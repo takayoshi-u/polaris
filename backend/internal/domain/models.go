@@ -110,6 +110,8 @@ type User struct {
 	AvatarURL   string    `json:"avatar_url"`
 	Status      string    `json:"status"`
 	Permissions []string  `json:"permissions,omitempty"`
+	MFAEnabled  bool      `json:"mfa_enabled"`
+	MFAEnforced bool      `json:"mfa_enforced"`
 	InviteURL   string    `json:"invite_url,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -137,6 +139,7 @@ type SystemSettings struct {
 	DefaultIssueTemplateID *string   `json:"default_issue_template_id"`
 	DefaultTaskTemplateID  *string   `json:"default_task_template_id"`
 	AllowedDomains         []string  `json:"allowed_domains"`
+	RequireMFA             bool      `json:"require_mfa"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
@@ -550,5 +553,34 @@ type BulkInviteResult struct {
 	InvitedUsers []*User             `json:"invited_users"`
 	Failures     []BulkInviteFailure `json:"failures"`
 }
+
+// MFA & WebAuthn Models
+type BackupCodeEntry struct {
+	Hash string `json:"hash"`
+	Used bool   `json:"used"`
+}
+
+type WebAuthnCredential struct {
+	ID              string     `json:"id"`
+	UserID          string     `json:"user_id"`
+	Name            string     `json:"name"`
+	CredentialID    string     `json:"credential_id"` // base64url encoded
+	AttestationType string     `json:"attestation_type"`
+	AAGUID          string     `json:"aaguid,omitempty"`
+	SignCount       int64      `json:"sign_count"`
+	CreatedAt       time.Time  `json:"created_at"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
+}
+
+type MFAStatus struct {
+	MFAEnabled           bool                  `json:"mfa_enabled"`
+	MFAEnforced          bool                  `json:"mfa_enforced"`
+	SystemMFARequired    bool                  `json:"system_mfa_required"`
+	HasTOTP              bool                  `json:"has_totp"`
+	HasWebAuthn          bool                  `json:"has_webauthn"`
+	WebAuthnCredentials  []*WebAuthnCredential `json:"webauthn_credentials"`
+	RemainingBackupCodes int                   `json:"remaining_backup_codes"`
+}
+
 
 

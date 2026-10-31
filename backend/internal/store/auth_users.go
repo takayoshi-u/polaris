@@ -105,33 +105,81 @@ func (s *Store) SetupInitialAdmin(ctx context.Context, email, password, displayN
 	return u, rawSessionToken, err
 }
 
-// LoginWithPassword authenticates an active user with email and password.
-func (s *Store) LoginWithPassword(ctx context.Context, email, password string) (*domain.User, string, error) {
+type LoginResult struct {
+	User           *domain.User `json:"user,omitempty"`
+	SessionToken   string       `json:"session_token,omitempty"`
+	MFARequired    bool         `json:"mfa_required,omitempty"`
+	TempToken      string       `json:"temp_token,omitempty"`
+	AllowedMethods []string     `json:"allowed_methods,omitempty"`
+	HasTOTP        bool         `json:"has_totp,omitempty"`
+	HasWebAuthn    bool         `json:"has_webauthn,omitempty"`
+}
+
+// AuthenticateWithPassword authenticates an active user with email and password, checking for MFA.
+func (s *Store) AuthenticateWithPassword(ctx context.Context, email, password string) (*LoginResult, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var userID, status string
-	var pwHash sql.NullString
+	var pwHash, totpSecret sql.NullString
+	var mfaEnabled bool
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, password_hash, status FROM users WHERE LOWER(email) = $1
-	`, email).Scan(&userID, &pwHash, &status)
+		SELECT id, password_hash, status, mfa_enabled, totp_secret
+		FROM users WHERE LOWER(email) = $1
+	`, email).Scan(&userID, &pwHash, &status, &mfaEnabled, &totpSecret)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, "", ErrUnauthorized
+		return nil, ErrUnauthorized
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if status != domain.UserStatusActive {
-		return nil, "", fmt.Errorf("%w: user account is %s", ErrForbidden, status)
+		return nil, fmt.Errorf("%w: user account is %s", ErrForbidden, status)
 	}
 	if !pwHash.Valid || !crypto.CheckPassword(password, pwHash.String) {
-		return nil, "", ErrUnauthorized
+		return nil, ErrUnauthorized
+	}
+
+	if mfaEnabled {
+		tempToken, err := s.CreateMFAChallenge(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		creds, _ := s.ListWebAuthnCredentials(ctx, userID)
+		hasTOTP := totpSecret.Valid && strings.TrimSpace(totpSecret.String) != ""
+		hasWebAuthn := len(creds) > 0
+
+		return &LoginResult{
+			MFARequired:    true,
+			TempToken:      tempToken,
+			AllowedMethods: []string{"totp", "webauthn", "backup_code"},
+			HasTOTP:        hasTOTP,
+			HasWebAuthn:    hasWebAuthn,
+		}, nil
 	}
 
 	token, err := s.CreateSession(ctx, userID)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	u, err := s.GetUserByID(ctx, userID)
-	return u, token, err
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{
+		User:         u,
+		SessionToken: token,
+	}, nil
+}
+
+// LoginWithPassword authenticates an active user with email and password.
+func (s *Store) LoginWithPassword(ctx context.Context, email, password string) (*domain.User, string, error) {
+	res, err := s.AuthenticateWithPassword(ctx, email, password)
+	if err != nil {
+		return nil, "", err
+	}
+	if res.MFARequired {
+		return nil, res.TempToken, nil
+	}
+	return res.User, res.SessionToken, nil
 }
 
 // LoginWithGoogle authenticates a pre-registered/active user by matching email (or google_sub).
@@ -247,9 +295,9 @@ func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, e
 	var u domain.User
 	var pwHash, googleSub sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, created_at, updated_at
+		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, mfa_enabled, mfa_enforced, created_at, updated_at
 		FROM users WHERE id = $1
-	`, userID).Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	`, userID).Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.MFAEnabled, &u.MFAEnforced, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -270,7 +318,7 @@ func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, e
 
 func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, created_at, updated_at
+		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, mfa_enabled, mfa_enforced, created_at, updated_at
 		FROM users ORDER BY id ASC
 	`)
 	if err != nil {
@@ -282,7 +330,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 	for rows.Next() {
 		var u domain.User
 		var pwHash, googleSub sql.NullString
-		if err := rows.Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.MFAEnabled, &u.MFAEnforced, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.HasPassword = pwHash.Valid && pwHash.String != ""

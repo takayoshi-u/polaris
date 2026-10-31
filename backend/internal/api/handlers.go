@@ -54,13 +54,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
-	u, tok, err := s.store.LoginWithPassword(r.Context(), body.Email, body.Password)
+	res, err := s.store.AuthenticateWithPassword(r.Context(), body.Email, body.Password)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	setSessionCookie(w, tok)
-	writeJSON(w, http.StatusOK, map[string]any{"user": u, "session_token": tok})
+	if res.MFARequired {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"mfa_required":    true,
+			"temp_token":      res.TempToken,
+			"allowed_methods": res.AllowedMethods,
+			"has_totp":        res.HasTOTP,
+			"has_webauthn":    res.HasWebAuthn,
+		})
+		return
+	}
+	setSessionCookie(w, res.SessionToken)
+	writeJSON(w, http.StatusOK, map[string]any{"user": res.User, "session_token": res.SessionToken})
 }
 
 func (s *Server) handleGoogleAuthURL(w http.ResponseWriter, r *http.Request) {
@@ -276,12 +286,13 @@ func (s *Server) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Reque
 		DefaultIssueTemplateID *string   `json:"default_issue_template_id"`
 		DefaultTaskTemplateID  *string   `json:"default_task_template_id"`
 		AllowedDomains         *[]string `json:"allowed_domains"`
+		RequireMFA             *bool     `json:"require_mfa"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
-	st, err := s.store.UpdateSystemSettings(r.Context(), body.DefaultHoursPerDay, body.DefaultIssueTemplateID, body.DefaultTaskTemplateID, body.AllowedDomains)
+	st, err := s.store.UpdateSystemSettings(r.Context(), body.DefaultHoursPerDay, body.DefaultIssueTemplateID, body.DefaultTaskTemplateID, body.AllowedDomains, body.RequireMFA)
 	if err != nil {
 		writeError(w, err)
 		return

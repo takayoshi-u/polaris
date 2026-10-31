@@ -15,6 +15,9 @@ var APIWebhooksSQL string
 //go:embed 003_advanced_pm_features.sql
 var AdvancedPMFeaturesSQL string
 
+//go:embed 004_mfa_webauthn.sql
+var MFAWebAuthnSQL string
+
 // Run executes the embedded database schema migrations in order.
 func Run(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, InitSQL); err != nil {
@@ -24,6 +27,9 @@ func Run(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, AdvancedPMFeaturesSQL); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, MFAWebAuthnSQL); err != nil {
 		return err
 	}
 	return nil

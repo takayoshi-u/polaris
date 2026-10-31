@@ -272,6 +272,8 @@
                 <th style="padding: 8px 16px; font-weight: 600;">表示名</th>
                 <th style="padding: 8px 16px; font-weight: 600;">メールアドレス</th>
                 <th style="padding: 8px 16px; font-weight: 600;">システム権限</th>
+                <th style="padding: 8px 16px; font-weight: 600;">MFA状況</th>
+                <th style="padding: 8px 16px; font-weight: 600;">MFA強制</th>
                 <th style="padding: 8px 16px; font-weight: 600; text-align: right;">操作</th>
               </tr>
             </thead>
@@ -304,6 +306,23 @@
                     </span>
                   </div>
                   <span v-else style="color: var(--text-muted);">-</span>
+                </td>
+                <td style="padding: 10px 16px;">
+                  <span :class="['badge', u.mfa_enabled ? 'badge-green' : 'badge-slate']" style="font-size: 11px;">
+                    {{ u.mfa_enabled ? 'MFA有効' : '未設定' }}
+                  </span>
+                </td>
+                <td style="padding: 10px 16px;">
+                  <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input
+                      type="checkbox"
+                      :checked="Boolean(u.mfa_enforced)"
+                      @change="toggleUserMFAEnforcement(u, ($event.target as HTMLInputElement).checked)"
+                    />
+                    <span :class="['badge', u.mfa_enforced ? 'badge-amber' : 'badge-slate']" style="font-size: 11px;">
+                      {{ u.mfa_enforced ? '強制中' : '任意' }}
+                    </span>
+                  </label>
                 </td>
                 <td style="padding: 10px 16px; text-align: right;">
                   <div style="display: inline-flex; align-items: center; gap: 6px;">
@@ -340,7 +359,7 @@
                 </td>
               </tr>
               <tr v-if="filteredUsers.length === 0">
-                <td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                <td colspan="7" style="padding: 24px; text-align: center; color: var(--text-muted);">
                   該当するユーザーは見つかりませんでした
                 </td>
               </tr>
@@ -465,6 +484,24 @@
                 ＋ 追加
               </button>
             </div>
+          </div>
+
+          <!-- MFA Global Enforcement Switch -->
+          <div style="padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-color); display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;">
+            <div>
+              <div style="font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                <span>🔐</span>
+                <span>システム全体で2要素認証（MFA）を必須化</span>
+                <span v-if="sysForm.require_mfa" class="badge badge-amber" style="font-size: 10px;">必須化中</span>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">
+                有効にすると、すべてのユーザーにMFA設定が義務付けられ、未設定ユーザーはログイン後にMFA設定を完了するまで操作が制限されます。
+              </p>
+            </div>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0; padding-top: 2px;">
+              <input v-model="sysForm.require_mfa" type="checkbox" style="width: 18px; height: 18px; cursor: pointer;" />
+              <span style="font-weight: 600; font-size: 13px;">{{ sysForm.require_mfa ? '有効' : '無効' }}</span>
+            </label>
           </div>
 
           <div style="padding-top: 4px;">
@@ -1408,7 +1445,8 @@ const sysForm = reactive({
   default_hours_per_day: 8.0,
   default_issue_template_id: '' as string | null,
   default_task_template_id: '' as string | null,
-  allowed_domains_text: ''
+  allowed_domains_text: '',
+  require_mfa: false
 })
 
 const smtpForm = reactive({
@@ -1648,6 +1686,7 @@ async function loadAdminData() {
     sysForm.default_issue_template_id = st.default_issue_template_id || null
     sysForm.default_task_template_id = st.default_task_template_id || null
     sysForm.allowed_domains_text = (st.allowed_domains || []).join('\n')
+    sysForm.require_mfa = Boolean(st.require_mfa)
     allowedDomainsList.value = [...(st.allowed_domains || [])]
 
     smtpForm.enabled = smtp.enabled
@@ -1685,13 +1724,28 @@ async function saveSystemSettings() {
         default_hours_per_day: sysForm.default_hours_per_day,
         default_issue_template_id: sysForm.default_issue_template_id,
         default_task_template_id: sysForm.default_task_template_id,
-        allowed_domains: allowedDomainsList.value
+        allowed_domains: allowedDomainsList.value,
+        require_mfa: sysForm.require_mfa
       })
     })
     await loadAdminData()
     notifyToast('システム基本設定を保存しました', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  }
+}
+
+async function toggleUserMFAEnforcement(u: User, enforced: boolean) {
+  try {
+    const updated = await apiFetch<User>(`/system/users/${u.id}/mfa-enforcement`, {
+      method: 'PUT',
+      body: JSON.stringify({ mfa_enforced: enforced })
+    })
+    u.mfa_enforced = updated.mfa_enforced
+    notifyToast(`ユーザー「${u.display_name}」のMFA強制を${enforced ? '有効' : '解除'}にしました`, 'success')
+  } catch (e: any) {
+    u.mfa_enforced = !enforced
+    notifyToast(e.message || 'MFA強制設定の更新に失敗しました', 'error')
   }
 }
 

@@ -31,8 +31,11 @@ CREATE TABLE IF NOT EXISTS mfa_challenges (
     temp_token_hash VARCHAR(128) NOT NULL UNIQUE,
     webauthn_challenge VARCHAR(128),
     totp_setup_secret TEXT,
+    failed_attempts INT NOT NULL DEFAULT 0,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE mfa_challenges ADD COLUMN IF NOT EXISTS failed_attempts INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user_id ON mfa_challenges(user_id);
+
 

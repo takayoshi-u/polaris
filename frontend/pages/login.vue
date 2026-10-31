@@ -186,6 +186,7 @@
 import { ArrowLeft, Key, ShieldCheck, Smartphone } from 'lucide-vue-next'
 import { isWebAuthnSupported, performWebAuthnLogin } from '~/utils/webauthn'
 
+const route = useRoute()
 const router = useRouter()
 const { apiFetch, notifyToast, refreshCurrentUser } = useApi()
 
@@ -215,6 +216,29 @@ const mfaState = reactive({
 })
 
 onMounted(async () => {
+  const mfaTempToken = (route.query.mfa_temp_token as string) || ''
+  if (mfaTempToken) {
+    mfaState.temp_token = mfaTempToken
+    isMfaStep.value = true
+    mfaState.has_totp = true
+    mfaTab.value = 'totp'
+
+    try {
+      const opts = await apiFetch<any>('/auth/mfa/webauthn/login-options', {
+        method: 'POST',
+        body: JSON.stringify({ temp_token: mfaTempToken })
+      })
+      if (opts && opts.allowCredentials && opts.allowCredentials.length > 0) {
+        mfaState.has_webauthn = true
+        if (isWebAuthnSupported()) {
+          mfaTab.value = 'webauthn'
+        }
+      }
+    } catch {
+      // webauthn not registered, fallback to totp
+    }
+  }
+
   try {
     const st = await apiFetch<{ setup_required?: boolean; needs_setup?: boolean }>('/setup/status')
     if (st.setup_required || st.needs_setup) {
@@ -280,6 +304,9 @@ function cancelMfa() {
   mfaState.temp_token = ''
   totpCode.value = ''
   backupCode.value = ''
+  if (route.query.mfa_temp_token) {
+    router.replace('/login')
+  }
 }
 
 async function authenticateTotp() {

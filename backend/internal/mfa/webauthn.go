@@ -186,6 +186,11 @@ func VerifyAssertion(clientDataJSON, authData, signature, cosePublicKey []byte, 
 	}
 	newSignCount := binary.BigEndian.Uint32(authData[33:37])
 
+	// WebAuthn Spec: Sign count validation (authenticator clone or replay detection)
+	if (newSignCount > 0 || currentSignCount > 0) && int64(newSignCount) <= currentSignCount {
+		return 0, errors.New("authenticator clone or replay detected: sign count must increase")
+	}
+
 	// 3. Signature Verification
 	// Signed message is authData || SHA-256(clientDataJSON)
 	clientDataHash := sha256.Sum256(clientDataJSON)

@@ -138,6 +138,28 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if u.MFAEnabled {
+		tempToken, err := s.store.CreateMFAChallenge(r.Context(), u.ID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		status, err := s.store.GetMFAStatus(r.Context(), u.ID)
+		hasTOTP := true
+		hasWebAuthn := false
+		if err == nil && status != nil {
+			hasTOTP = status.HasTOTP
+			hasWebAuthn = status.HasWebAuthn
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"mfa_required":    true,
+			"temp_token":      tempToken,
+			"allowed_methods": []string{"totp", "webauthn", "backup_code"},
+			"has_totp":        hasTOTP,
+			"has_webauthn":    hasWebAuthn,
+		})
+		return
+	}
 	setSessionCookie(w, tok)
 	writeJSON(w, http.StatusOK, map[string]any{"user": u, "session_token": tok})
 }

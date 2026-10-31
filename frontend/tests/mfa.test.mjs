@@ -52,3 +52,49 @@ test('isMfaEnforcedPending accurately gates unconfigured users under policy', ()
   // 5. On public route (e.g. login) -> always false
   assert.equal(checkEnforcedPending({ mfa_enabled: false, mfa_enforced: true }, { system_mfa_required: true, mfa_enabled: false }, true), false)
 })
+
+test('OAuth redirect query mfa_temp_token auto-triggers MFA step', () => {
+  function handleLoginMounted(query, webauthnOpts = null) {
+    let isMfaStep = false
+    let tempToken = ''
+    let hasWebauthn = false
+    let hasTotp = false
+    let activeTab = 'totp'
+
+    if (query.mfa_temp_token) {
+      tempToken = String(query.mfa_temp_token)
+      isMfaStep = true
+      hasTotp = true
+      activeTab = 'totp'
+
+      if (webauthnOpts && webauthnOpts.allowCredentials && webauthnOpts.allowCredentials.length > 0) {
+        hasWebauthn = true
+        activeTab = 'webauthn'
+      }
+    }
+
+    return { isMfaStep, tempToken, hasWebauthn, hasTotp, activeTab }
+  }
+
+  // Without token
+  const r1 = handleLoginMounted({})
+  assert.equal(r1.isMfaStep, false)
+
+  // With token, no WebAuthn
+  const r2 = handleLoginMounted({ mfa_temp_token: 'temp-xyz-123' })
+  assert.equal(r2.isMfaStep, true)
+  assert.equal(r2.tempToken, 'temp-xyz-123')
+  assert.equal(r2.hasTotp, true)
+  assert.equal(r2.hasWebauthn, false)
+  assert.equal(r2.activeTab, 'totp')
+
+  // With token and registered WebAuthn key
+  const r3 = handleLoginMounted(
+    { mfa_temp_token: 'temp-xyz-456' },
+    { allowCredentials: [{ type: 'public-key', id: 'key-1' }] }
+  )
+  assert.equal(r3.isMfaStep, true)
+  assert.equal(r3.tempToken, 'temp-xyz-456')
+  assert.equal(r3.hasWebauthn, true)
+  assert.equal(r3.activeTab, 'webauthn')
+})

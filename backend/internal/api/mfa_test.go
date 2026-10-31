@@ -92,6 +92,7 @@ type mockChallenge struct {
 	tempTokenHash      string
 	webauthnChallenge  string
 	totpSetupSecret    string
+	failedAttempts     int
 	expiresAt          time.Time
 }
 
@@ -301,11 +302,21 @@ func (s *mfaMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 	defer st.mu.Unlock()
 
 	switch {
+	case strings.Contains(q, "UPDATE mfa_challenges") && strings.Contains(q, "failed_attempts = failed_attempts + 1"):
+		tHash := fmt.Sprintf("%v", args[0])
+		attempts := 1
+		if c, ok := st.challenges[tHash]; ok {
+			c.failedAttempts++
+			attempts = c.failedAttempts
+		}
+		cols := []string{"failed_attempts"}
+		return &mockRows{cols: cols, rows: [][]driver.Value{{attempts}}}, nil
+
 	case strings.Contains(q, "FROM mfa_challenges") && strings.Contains(q, "temp_token_hash = $1"):
 		tHash := fmt.Sprintf("%v", args[0])
 		c, ok := st.challenges[tHash]
 		if strings.Contains(q, "user_id") {
-			cols := []string{"user_id", "webauthn_challenge", "expires_at"}
+			cols := []string{"user_id", "webauthn_challenge", "expires_at", "failed_attempts"}
 			if !ok {
 				return &mockRows{cols: cols, rows: nil}, nil
 			}
@@ -313,7 +324,7 @@ func (s *mfaMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 			if c.webauthnChallenge != "" {
 				wChall = c.webauthnChallenge
 			}
-			return &mockRows{cols: cols, rows: [][]driver.Value{{c.userID, wChall, c.expiresAt}}}, nil
+			return &mockRows{cols: cols, rows: [][]driver.Value{{c.userID, wChall, c.expiresAt, c.failedAttempts}}}, nil
 		}
 		cols := []string{"webauthn_challenge", "expires_at"}
 		if !ok {

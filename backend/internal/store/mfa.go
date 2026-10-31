@@ -45,23 +45,44 @@ func (s *Store) GetMFAChallenge(ctx context.Context, tempToken string) (string, 
 	var userID string
 	var webauthnChallenge sql.NullString
 	var expiresAt time.Time
+	var failedAttempts int
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT user_id, webauthn_challenge, expires_at
+		SELECT user_id, webauthn_challenge, expires_at, failed_attempts
 		FROM mfa_challenges
 		WHERE temp_token_hash = $1
-	`, tokenHash).Scan(&userID, &webauthnChallenge, &expiresAt)
+	`, tokenHash).Scan(&userID, &webauthnChallenge, &expiresAt, &failedAttempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", fmt.Errorf("%w: invalid or expired temp token", ErrUnauthorized)
 	}
 	if err != nil {
 		return "", "", err
 	}
-	if time.Now().UTC().After(expiresAt) {
+	if time.Now().UTC().After(expiresAt) || failedAttempts >= 5 {
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM mfa_challenges WHERE temp_token_hash = $1`, tokenHash)
-		return "", "", fmt.Errorf("%w: temp token expired", ErrUnauthorized)
+		return "", "", fmt.Errorf("%w: temp token expired or maximum attempts exceeded", ErrUnauthorized)
 	}
 	return userID, webauthnChallenge.String, nil
+}
+
+// RecordMFAFailure increments the failure counter for a challenge and revokes it if attempts reach 5.
+func (s *Store) RecordMFAFailure(ctx context.Context, tempToken string) error {
+	tokenHash := crypto.HashToken(tempToken)
+	var attempts int
+	err := s.db.QueryRowContext(ctx, `
+		UPDATE mfa_challenges
+		SET failed_attempts = failed_attempts + 1
+		WHERE temp_token_hash = $1
+		RETURNING failed_attempts
+	`, tokenHash).Scan(&attempts)
+	if err != nil {
+		return err
+	}
+	if attempts >= 5 {
+		_, _ = s.ConsumeMFAChallenge(ctx, tempToken)
+		return fmt.Errorf("%w: maximum verification attempts exceeded; please login again", ErrUnauthorized)
+	}
+	return nil
 }
 
 // SetMFAChallengeWebAuthn sets the WebAuthn challenge for an active temp_token.
@@ -304,6 +325,7 @@ func (s *Store) VerifyMFA(ctx context.Context, tempToken, method, code string) (
 			return nil, "", fmt.Errorf("%w: TOTP is not configured for this user", ErrBadRequest)
 		}
 		if !mfa.ValidateTOTP(totpSecret.String, code, time.Now()) {
+			_ = s.RecordMFAFailure(ctx, tempToken)
 			return nil, "", fmt.Errorf("%w: invalid TOTP passcode", ErrUnauthorized)
 		}
 
@@ -314,6 +336,7 @@ func (s *Store) VerifyMFA(ctx context.Context, tempToken, method, code string) (
 		}
 		matched, updated, err := mfa.VerifyAndUseBackupCode(entries, code)
 		if err != nil || !matched {
+			_ = s.RecordMFAFailure(ctx, tempToken)
 			return nil, "", fmt.Errorf("%w: invalid or already used backup code", ErrUnauthorized)
 		}
 		newJSON, _ := json.Marshal(updated)
@@ -512,13 +535,13 @@ func (s *Store) DeleteWebAuthnCredential(ctx context.Context, userID, credUUID s
 
 // RegenerateBackupCodes creates a fresh set of 8 backup codes.
 func (s *Store) RegenerateBackupCodes(ctx context.Context, userID, password string) ([]string, error) {
-	if password != "" {
-		var pwHash sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = $1`, userID).Scan(&pwHash)
-		if err != nil {
-			return nil, err
-		}
-		if pwHash.Valid && pwHash.String != "" && !crypto.CheckPassword(password, pwHash.String) {
+	var pwHash sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = $1`, userID).Scan(&pwHash)
+	if err != nil {
+		return nil, err
+	}
+	if pwHash.Valid && pwHash.String != "" {
+		if strings.TrimSpace(password) == "" || !crypto.CheckPassword(password, pwHash.String) {
 			return nil, fmt.Errorf("%w: invalid password", ErrUnauthorized)
 		}
 	}

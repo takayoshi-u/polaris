@@ -48,8 +48,10 @@
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitResetRequest">
           <input v-model="resetEmail" type="email" required style="width: 100%;" placeholder="you@example.com" />
           <div style="display: flex; justify-content: flex-end; gap: 8px;">
-            <button type="button" class="btn btn-secondary" @click="showResetModal = false">キャンセル</button>
-            <button type="submit" class="btn btn-primary">送信する</button>
+            <button type="button" class="btn btn-secondary" :disabled="isSubmittingReset" @click="showResetModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary" :disabled="isSubmittingReset">
+              {{ isSubmittingReset ? '送信中...' : '送信する' }}
+            </button>
           </div>
         </form>
       </div>
@@ -65,6 +67,7 @@ const loading = ref(false)
 const googleAuthUrl = ref('')
 const showResetModal = ref(false)
 const resetEmail = ref('')
+const isSubmittingReset = ref(false)
 
 const form = reactive({
   email: '',
@@ -105,16 +108,24 @@ async function submitLogin() {
 }
 
 async function submitResetRequest() {
+  if (isSubmittingReset.value) return
+  if (!resetEmail.value.trim()) {
+    notifyToast('メールアドレスを入力してください', 'error')
+    return
+  }
+  isSubmittingReset.value = true
   try {
     await apiFetch('/auth/password-reset/request', {
       method: 'POST',
-      body: JSON.stringify({ email: resetEmail.value })
+      body: JSON.stringify({ email: resetEmail.value.trim() })
     })
     showResetModal.value = false
     resetEmail.value = ''
     notifyToast('パスワード再設定メールを送信しました（1時間有効）', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  } finally {
+    isSubmittingReset.value = false
   }
 }
 </script>

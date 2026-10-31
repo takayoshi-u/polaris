@@ -22,12 +22,17 @@ export function usePolarisState() {
     }
   }
 
+  function removeToast(id: number) {
+    toasts.value = toasts.value.filter(t => t.id !== id)
+  }
+
   return {
     currentUser,
     projects,
     notifications,
     toasts,
-    notifyToast
+    notifyToast,
+    removeToast
   }
 }
 

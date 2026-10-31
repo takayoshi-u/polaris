@@ -263,7 +263,7 @@
 
                 <!-- Status Badge with Instant Dropdown -->
                 <td style="padding: 4px 10px; position: relative;">
-                  <div style="display: inline-block;">
+                  <div class="status-picker-container" style="display: inline-block;">
                     <button
                       type="button"
                       class="badge"
@@ -320,7 +320,7 @@
                 </td>
 
                 <!-- Assignee with Quick Change -->
-                <td style="padding: 4px 10px; position: relative;">
+                <td class="assignee-picker-container" style="padding: 4px 10px; position: relative;">
                   <button
                     type="button"
                     class="btn btn-ghost btn-sm"
@@ -797,4 +797,28 @@ async function saveField(task: Task, field: string, value: any) {
     notifyToast(e.message || '保存に失敗しました', 'error')
   }
 }
+
+// Outside click handler for status & assignee popovers
+function handleDocumentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  if (openStatusTaskId.value && !target.closest('.status-picker-container')) {
+    openStatusTaskId.value = null
+  }
+  if (openAssigneeTaskId.value && !target.closest('.assignee-picker-container')) {
+    openAssigneeTaskId.value = null
+  }
+}
+
+onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', handleDocumentClick)
+  }
+})
+
+onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('click', handleDocumentClick)
+  }
+})
 </script>

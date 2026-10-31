@@ -34,6 +34,7 @@ type IssueUpdateInput struct {
 
 type TaskCreateInput struct {
 	IssueID          string
+	SprintID         *string
 	TemplateID       *string
 	StatusID         *string
 	Title            string
@@ -47,6 +48,7 @@ type TaskCreateInput struct {
 	ActualHours      *float64
 	PlannedCost      *float64
 	ActualCost       *float64
+	StoryPoints      *float64
 	Assignees        []domain.SubjectRef
 	LabelIDs         []string
 	CustomValues     map[string]json.RawMessage
@@ -54,6 +56,8 @@ type TaskCreateInput struct {
 
 type TaskUpdateInput struct {
 	IssueID           *string
+	SprintID          *string
+	ClearSprintID     bool
 	TemplateID        *string
 	StatusID          *string
 	Title             *string
@@ -71,6 +75,8 @@ type TaskUpdateInput struct {
 	ClearPlannedCost  bool
 	ActualCost        *float64
 	ClearActualCost   bool
+	StoryPoints       *float64
+	ClearStoryPoints  bool
 	Assignees         *[]domain.SubjectRef
 	LabelIDs          *[]string
 	CustomValues      map[string]json.RawMessage
@@ -675,16 +681,16 @@ func (s *Store) CreateTask(ctx context.Context, projectID, creatorUserID string,
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks (
-			id, project_id, issue_id, template_id, owner_user_id, status_id,
+			id, project_id, issue_id, sprint_id, template_id, owner_user_id, status_id,
 			title, description, progress, planned_start_date, planned_end_date,
 			actual_start_date, actual_end_date, planned_hours, actual_hours,
-			planned_cost, actual_cost,
+			planned_cost, actual_cost, story_points,
 			kanban_order, gantt_order, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20)
-	`, taskID, projectID, in.IssueID, tplID, creatorUserID, statusID, title, desc, in.Progress,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $22)
+	`, taskID, projectID, in.IssueID, in.SprintID, tplID, creatorUserID, statusID, title, desc, in.Progress,
 		nullDate(in.PlannedStartDate), nullDate(in.PlannedEndDate),
 		nullDate(in.ActualStartDate), nullDate(in.ActualEndDate),
-		in.PlannedHours, in.ActualHours, plannedCost, actualCost, maxKanban+1, maxGantt+1, now); err != nil {
+		in.PlannedHours, in.ActualHours, plannedCost, actualCost, in.StoryPoints, maxKanban+1, maxGantt+1, now); err != nil {
 		return nil, err
 	}
 
@@ -733,6 +739,8 @@ func (s *Store) CreateTask(ctx context.Context, projectID, creatorUserID string,
 		return nil, err
 	}
 
+	_ = s.LogActivity(ctx, projectID, "task", taskID, "created", map[string]interface{}{"title": title}, &creatorUserID)
+
 	// Notify assignees (excluding creatorUserID)
 	if len(in.Assignees) > 0 {
 		_ = s.notifySubjects(ctx, projectID, domain.NotificationTypeAssign, domain.TargetTask, taskID, creatorUserID, in.Assignees, fmt.Sprintf("タスク「%s」の担当者に割り当てられました", title))
@@ -755,23 +763,23 @@ func (s *Store) GetTask(ctx context.Context, projectID, taskID, viewerUserID str
 
 func (s *Store) getTaskInternal(ctx context.Context, proj *domain.Project, taskID, viewerUserID string, userGroups []string) (*domain.Task, error) {
 	var t domain.Task
-	var tplID sql.NullString
+	var tplID, sprintID sql.NullString
 	var desc string
 	var pStart, pEnd, aStart, aEnd sql.NullTime
-	var pHours, aHours, pCost, aCost sql.NullFloat64
+	var pHours, aHours, pCost, aCost, storyPoints sql.NullFloat64
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, issue_id, template_id, owner_user_id, status_id,
+		SELECT id, project_id, issue_id, sprint_id, template_id, owner_user_id, status_id,
 		       title, description, progress, planned_start_date, planned_end_date,
 		       actual_start_date, actual_end_date, planned_hours, actual_hours,
-		       planned_cost, actual_cost,
+		       planned_cost, actual_cost, story_points,
 		       kanban_order, gantt_order, created_at, updated_at
 		FROM tasks WHERE id = $1 AND project_id = $2
 	`, taskID, proj.ID).Scan(
-		&t.ID, &t.ProjectID, &t.IssueID, &tplID, &t.OwnerUserID, &t.StatusID,
+		&t.ID, &t.ProjectID, &t.IssueID, &sprintID, &tplID, &t.OwnerUserID, &t.StatusID,
 		&t.Title, &desc, &t.Progress, &pStart, &pEnd,
 		&aStart, &aEnd, &pHours, &aHours,
-		&pCost, &aCost,
+		&pCost, &aCost, &storyPoints,
 		&t.KanbanOrder, &t.GanttOrder, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -779,6 +787,13 @@ func (s *Store) getTaskInternal(ctx context.Context, proj *domain.Project, taskI
 	}
 	if err != nil {
 		return nil, err
+	}
+	if sprintID.Valid {
+		t.SprintID = &sprintID.String
+	}
+	if storyPoints.Valid {
+		v := storyPoints.Float64
+		t.StoryPoints = &v
 	}
 	if tplID.Valid {
 		t.TemplateID = &tplID.String
@@ -873,18 +888,18 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 	}
 
 	var rawOwnerID, rawIssueID, rawStatusID, rawTitle, rawDesc string
-	var rawTplID sql.NullString
+	var rawTplID, currentSprintID sql.NullString
 	var rawProgress, rawKanbanOrder, rawGanttOrder int
 	var pStart, pEnd, aStart, aEnd sql.NullTime
-	var pHours, aHours, pCost, aCost sql.NullFloat64
+	var pHours, aHours, pCost, aCost, currentSP sql.NullFloat64
 
 	err = s.db.QueryRowContext(ctx, `
-		SELECT issue_id, template_id, owner_user_id, status_id, title, description, progress,
+		SELECT issue_id, template_id, sprint_id, story_points, owner_user_id, status_id, title, description, progress,
 		       planned_start_date, planned_end_date, actual_start_date, actual_end_date,
 		       planned_hours, actual_hours, planned_cost, actual_cost, kanban_order, gantt_order
 		FROM tasks WHERE id = $1 AND project_id = $2
 	`, taskID, projectID).Scan(
-		&rawIssueID, &rawTplID, &rawOwnerID, &rawStatusID, &rawTitle, &rawDesc, &rawProgress,
+		&rawIssueID, &rawTplID, &currentSprintID, &currentSP, &rawOwnerID, &rawStatusID, &rawTitle, &rawDesc, &rawProgress,
 		&pStart, &pEnd, &aStart, &aEnd, &pHours, &aHours, &pCost, &aCost, &rawKanbanOrder, &rawGanttOrder,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1054,6 +1069,27 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 		}
 	}
 
+	var rawSprintID *string
+	if currentSprintID.Valid {
+		rawSprintID = &currentSprintID.String
+	}
+	if in.ClearSprintID {
+		rawSprintID = nil
+	} else if in.SprintID != nil {
+		rawSprintID = in.SprintID
+	}
+
+	var rawStoryPoints *float64
+	if currentSP.Valid {
+		v := currentSP.Float64
+		rawStoryPoints = &v
+	}
+	if in.ClearStoryPoints {
+		rawStoryPoints = nil
+	} else if in.StoryPoints != nil {
+		rawStoryPoints = in.StoryPoints
+	}
+
 	if in.IssueID != nil && *in.IssueID != "" {
 		var issueExists int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE id = $1 AND project_id = $2`, *in.IssueID, projectID).Scan(&issueExists); err != nil || issueExists == 0 {
@@ -1079,15 +1115,15 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
-		SET issue_id = $1, template_id = $2, status_id = $3, title = $4, description = $5,
-		    progress = $6, planned_start_date = $7, planned_end_date = $8,
-		    actual_start_date = $9, actual_end_date = $10, planned_hours = $11, actual_hours = $12,
-		    planned_cost = $13, actual_cost = $14,
-		    kanban_order = $15, gantt_order = $16, updated_at = $17
-		WHERE id = $18 AND project_id = $19
-	`, rawIssueID, tplID, rawStatusID, rawTitle, rawDesc, rawProgress,
+		SET issue_id = $1, sprint_id = $2, template_id = $3, status_id = $4, title = $5, description = $6,
+		    progress = $7, planned_start_date = $8, planned_end_date = $9,
+		    actual_start_date = $10, actual_end_date = $11, planned_hours = $12, actual_hours = $13,
+		    planned_cost = $14, actual_cost = $15, story_points = $16,
+		    kanban_order = $17, gantt_order = $18, updated_at = $19
+		WHERE id = $20 AND project_id = $21
+	`, rawIssueID, rawSprintID, tplID, rawStatusID, rawTitle, rawDesc, rawProgress,
 		nullDate(plannedStart), nullDate(plannedEnd), nullDate(actualStart), nullDate(actualEnd),
-		plannedHours, actualHours, plannedCost, actualCost, rawKanbanOrder, rawGanttOrder, now, taskID, projectID); err != nil {
+		plannedHours, actualHours, plannedCost, actualCost, rawStoryPoints, rawKanbanOrder, rawGanttOrder, now, taskID, projectID); err != nil {
 		return nil, err
 	}
 
@@ -1146,6 +1182,8 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+
+	_ = s.LogActivity(ctx, projectID, "task", taskID, "updated", map[string]interface{}{"title": rawTitle, "progress": rawProgress, "status_id": rawStatusID}, &actorUserID)
 
 	if len(addedAssignees) > 0 {
 		_ = s.notifySubjects(ctx, projectID, domain.NotificationTypeAssign, domain.TargetTask, taskID, actorUserID, addedAssignees, fmt.Sprintf("タスク「%s」の担当者に割り当てられました", rawTitle))
@@ -1222,6 +1260,7 @@ func (s *Store) DeleteTask(ctx context.Context, projectID, taskID, actorUserID s
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	_ = s.LogActivity(ctx, projectID, "task", taskID, "deleted", map[string]interface{}{"task_id": taskID}, &actorUserID)
 	return nil
 }
 

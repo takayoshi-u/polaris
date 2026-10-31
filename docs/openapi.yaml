@@ -475,6 +475,17 @@ components:
           multipleOf: 0.01
           description: 実績コスト（小数点第2位まで、0以上）
           nullable: true
+        sprint_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: 所属スプリントID
+        story_points:
+          type: number
+          minimum: 0
+          multipleOf: 0.1
+          description: ストーリーポイント（SP）
+          nullable: true
         assignees:
           type: array
           items:
@@ -753,6 +764,247 @@ components:
         created_at:
           type: string
           format: date-time
+
+    TaskDependency:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        predecessor_id:
+          type: string
+          format: uuid
+        successor_id:
+          type: string
+          format: uuid
+        dependency_type:
+          type: string
+          enum: [FS, SS, FF, SF]
+          default: FS
+        lag_days:
+          type: integer
+          default: 0
+        created_at:
+          type: string
+          format: date-time
+
+    Sprint:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        goal:
+          type: string
+          nullable: true
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum: [planned, active, closed]
+        task_count:
+          type: integer
+        total_story_points:
+          type: number
+        total_planned_hours:
+          type: number
+        total_actual_hours:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BurndownDataPoint:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        ideal_story_points:
+          type: number
+        remaining_story_points:
+          type: number
+        ideal_hours:
+          type: number
+        remaining_hours:
+          type: number
+
+    SprintBurndown:
+      type: object
+      properties:
+        sprint_id:
+          type: string
+          format: uuid
+        sprint_name:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        total_story_points:
+          type: number
+        total_hours:
+          type: number
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/BurndownDataPoint'
+
+    ActivityLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        details:
+          type: object
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        actor_name:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    WikiPage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        slug:
+          type: string
+        content:
+          type: string
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        sort_order:
+          type: integer
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/WikiPage'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InboundWebhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        token:
+          type: string
+          description: 作成時のみ平文トークンが返却されます
+        secret:
+          type: string
+        default_issue_id:
+          type: string
+          format: uuid
+          nullable: true
+        default_status_id:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InboundWebhookPayload:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status_id:
+          type: string
+        issue_id:
+          type: string
+        planned_hours:
+          type: number
+        story_points:
+          type: number
+        assignee_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        label_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    CSVImportResult:
+      type: object
+      properties:
+        imported_tasks:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
 
 paths:
   /health:
@@ -1606,4 +1858,376 @@ paths:
       responses:
         '200':
           description: 配信履歴一覧
+
+  # Advanced Project Management Endpoints (PR 1)
+  /projects/{projectId}/dependencies:
+    get:
+      summary: タスク依存関係一覧取得
+      responses:
+        '200':
+          description: 依存関係一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskDependency'
+    post:
+      summary: タスク依存関係登録（循環依存および自己依存の自動検知防止）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [predecessor_id, successor_id]
+              properties:
+                predecessor_id:
+                  type: string
+                  format: uuid
+                successor_id:
+                  type: string
+                  format: uuid
+                dependency_type:
+                  type: string
+                  enum: [FS, SS, FF, SF]
+                  default: FS
+                lag_days:
+                  type: integer
+                  default: 0
+      responses:
+        '201':
+          description: 依存関係登録完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDependency'
+        '400':
+          description: 循環依存または不正なリクエスト
+
+  /projects/{projectId}/dependencies/{depId}:
+    delete:
+      summary: タスク依存関係削除
+      responses:
+        '204':
+          description: 削除完了
+
+  /projects/{projectId}/sprints:
+    get:
+      summary: プロジェクト内スプリント一覧取得
+      responses:
+        '200':
+          description: スプリント一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sprint'
+    post:
+      summary: スプリント作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                goal:
+                  type: string
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                status:
+                  type: string
+                  enum: [planned, active, closed]
+                  default: planned
+      responses:
+        '201':
+          description: スプリント作成完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sprint'
+
+  /sprints/{sprintId}:
+    get:
+      summary: スプリント詳細取得
+      responses:
+        '200':
+          description: スプリント詳細
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sprint'
+    put:
+      summary: スプリント更新
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                goal:
+                  type: string
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                status:
+                  type: string
+                  enum: [planned, active, closed]
+      responses:
+        '200':
+          description: スプリント更新完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sprint'
+    delete:
+      summary: スプリント削除
+      responses:
+        '204':
+          description: 削除完了
+
+  /sprints/{sprintId}/burndown:
+    get:
+      summary: スプリントバーンダウンデータ取得（SP・時間推移）
+      responses:
+        '200':
+          description: バーンダウンチャートデータ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SprintBurndown'
+
+  /projects/{projectId}/activity:
+    get:
+      summary: プロジェクト内アクティビティ履歴ログ取得
+      parameters:
+        - name: entity_type
+          in: query
+          schema:
+            type: string
+        - name: entity_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: アクティビティ履歴一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivityLog'
+
+  /projects/{projectId}/wiki:
+    get:
+      summary: プロジェクトWikiページ一覧取得（ツリー階層構造）
+      responses:
+        '200':
+          description: Wikiページ一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WikiPage'
+    post:
+      summary: プロジェクトWikiページ作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content]
+              properties:
+                title:
+                  type: string
+                slug:
+                  type: string
+                content:
+                  type: string
+                parent_id:
+                  type: string
+                  format: uuid
+                sort_order:
+                  type: integer
+      responses:
+        '201':
+          description: Wikiページ作成完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPage'
+
+  /wiki/{wikiId}:
+    get:
+      summary: Wikiページ詳細取得
+      responses:
+        '200':
+          description: Wikiページ詳細
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPage'
+    put:
+      summary: Wikiページ更新
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                slug:
+                  type: string
+                content:
+                  type: string
+                parent_id:
+                  type: string
+                  format: uuid
+                sort_order:
+                  type: integer
+      responses:
+        '200':
+          description: 更新完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiPage'
+    delete:
+      summary: Wikiページ削除
+      responses:
+        '204':
+          description: 削除完了
+
+  /projects/{projectId}/inbound-webhooks:
+    get:
+      summary: プロジェクトInbound Webhook一覧取得
+      responses:
+        '200':
+          description: Inbound Webhook一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InboundWebhook'
+    post:
+      summary: Inbound Webhookトークン発行・作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                default_issue_id:
+                  type: string
+                  format: uuid
+                default_status_id:
+                  type: integer
+      responses:
+        '201':
+          description: 作成完了（トークン返却）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundWebhook'
+
+  /inbound-webhooks/{webhookId}:
+    delete:
+      summary: Inbound Webhook削除・トークン無効化
+      responses:
+        '204':
+          description: 削除完了
+
+  /inbound-webhooks/{token}:
+    post:
+      summary: 外部システム連携用Inbound Webhook受信（認証不要の公開エンドポイント）
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InboundWebhookPayload'
+      responses:
+        '201':
+          description: タスク自動起票完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '401':
+          description: トークン無効または存在しない
+
+  /projects/{projectId}/export/csv:
+    get:
+      summary: プロジェクト全課題・タスクのCSVエクスポート（UTF-8 BOM付き）
+      responses:
+        '200':
+          description: CSVファイルダウンロード
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
+  /projects/{projectId}/import/csv:
+    post:
+      summary: プロジェクトタスクの一括CSVインポート
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+          text/csv:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: インポート結果（成功件数およびエラー行）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CSVImportResult'
+
 

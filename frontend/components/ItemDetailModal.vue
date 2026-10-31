@@ -106,8 +106,42 @@
           </div>
           <h2 style="font-size: 20px; font-weight: 700;">{{ form.title || '(無題)' }}</h2>
         </div>
+
+        <!-- Tab Switcher: Details vs History -->
+        <div style="display: flex; gap: 4px; padding: 2px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color);">
+          <button
+            type="button"
+            class="btn btn-sm"
+            :class="modalTab === 'details' ? 'btn-primary' : 'btn-ghost'"
+            style="font-size: 12px;"
+            @click="modalTab = 'details'"
+          >
+            📝 詳細項目
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm"
+            :class="modalTab === 'history' ? 'btn-primary' : 'btn-ghost'"
+            style="font-size: 12px;"
+            @click="modalTab = 'history'"
+          >
+            ⏱️ 履歴 (Activity)
+          </button>
+        </div>
       </div>
 
+      <!-- HISTORY TAB CONTENT -->
+      <div v-if="modalTab === 'history'" style="padding: 4px 0;">
+        <ActivityLogView
+          :project-id="projectId"
+          :entity-type="targetType"
+          :entity-id="targetId"
+          :users="users"
+        />
+      </div>
+
+      <!-- DETAILS TAB CONTENT -->
+      <template v-else>
       <!-- Issue Rollup Summary Banner (When viewing an Issue) -->
       <div
         v-if="targetType === 'issue' && issue?.rollup"
@@ -889,6 +923,7 @@
           </div>
         </form>
       </div>
+      </template>
     </div>
 
     <!-- Lightbox Modal -->
@@ -964,6 +999,8 @@ const canEditAny = computed(() => props.currentUserRole === 'admin' || props.cur
 const canTransferOwner = computed(() => {
   return props.currentUserRole === 'admin' || (currentUser.value && currentUser.value.id === ownerUserId.value)
 })
+
+const modalTab = ref<'details' | 'history'>('details')
 
 const applicableTemplates = computed(() => props.templates.filter(t => t.target_type === props.targetType))
 

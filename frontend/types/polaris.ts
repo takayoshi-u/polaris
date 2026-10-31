@@ -345,12 +345,48 @@ export interface SprintBurndown {
 export interface ActivityLog {
   id: string
   project_id: string
-  user_id: string
   entity_type: string
   entity_id: string
   action: string
   details?: Record<string, any>
+  actor_id?: string | null
+  actor_name?: string | null
+  user_id?: string
   created_at: string
 }
+
+export interface WikiPage {
+  id: string
+  project_id: string
+  title: string
+  slug: string
+  content: string
+  parent_id?: string | null
+  sort_order?: number
+  created_by?: string | null
+  updated_by?: string | null
+  children?: WikiPage[]
+  created_at: string
+  updated_at: string
+}
+
+export interface InboundWebhook {
+  id: string
+  project_id: string
+  name: string
+  token?: string
+  secret?: string
+  default_issue_id?: string | null
+  default_status_id?: string | number | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CSVImportResult {
+  imported_tasks: number
+  errors: string[]
+}
+
 
 

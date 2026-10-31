@@ -1745,7 +1745,7 @@ const labelForm = reactive({
 })
 
 const cfForm = reactive({
-  target_type: 'task' as TargetType,
+  target_type: 'issue' as TargetType,
   name: '',
   field_type: 'text_single',
   options_csv: ''
@@ -2419,6 +2419,7 @@ async function createCustomField() {
         options
       })
     })
+    cfForm.target_type = 'issue'
     cfForm.name = ''
     cfForm.options_csv = ''
     await loadWorkspace()

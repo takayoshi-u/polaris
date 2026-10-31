@@ -4,12 +4,11 @@
 
 ## ドキュメント一覧
 
-システムの詳細仕様・データベース設計・API仕様・画面デザインは以下のドキュメントを参照してください。
+システムの詳細仕様・データベース設計・API仕様は以下のドキュメントを参照してください。
 
 - **[確定仕様書 (`docs/specification.md`)](docs/specification.md)** — システム全体のドメインルール、権限モデル、画面・機能仕様
 - **[ER図・テーブル定義書 (`docs/er.md`)](docs/er.md)** — PostgreSQL 17 データベースの Mermaid ER図および全 29 テーブルの定義（全主キー UUID v7）
 - **[OpenAPI 3.0.3 仕様書 (`docs/openapi.yaml`)](docs/openapi.yaml)** — バックエンド REST API（`/api/v1`）の全エンドポイント・リクエスト／レスポンススキーマ定義
-- **[Figma 取り込み用画面デザイン (`docs/design/polaris_screens.svg`)](docs/design/polaris_screens.svg)** — Figma へドラッグ＆ドロップまたはペースト可能な画面デザイン SVG
 
 ---
 
@@ -43,9 +42,7 @@
 ├── docs/
 │   ├── specification.md             # システム全体確定仕様書
 │   ├── er.md                        # Mermaid ER図・全29テーブル定義
-│   ├── openapi.yaml                 # OpenAPI 3.0.3 API仕様書
-│   └── design/
-│       └── polaris_screens.svg      # Figma インポート対応 画面デザイン案 SVG
+│   └── openapi.yaml                 # OpenAPI 3.0.3 API仕様書
 ├── backend/
 │   ├── Dockerfile
 │   ├── go.mod

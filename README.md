@@ -170,3 +170,10 @@ node --test frontend/tests/format.test.mjs
 3. **レビュー・承認プロセス**:
    - 単体テスト・ビルドの完全通過、テスターペルソナ受入検証、およびレビュアーの承認（`APPROVE`）を経てからマージ（`gh pr merge --merge`）を実施してください。
 
+---
+
+## ライセンス
+
+本プロジェクトは [MIT License](LICENSE) の下で公開されています。
+
+

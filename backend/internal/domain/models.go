@@ -285,6 +285,7 @@ type Task struct {
 	ID               string                          `json:"id"`
 	ProjectID        string                          `json:"project_id"`
 	IssueID          string                          `json:"issue_id"`
+	SprintID         *string                         `json:"sprint_id"`
 	TemplateID       *string                         `json:"template_id"`
 	OwnerUserID      string                          `json:"owner_user_id"`
 	StatusID         string                          `json:"status_id"`
@@ -299,6 +300,7 @@ type Task struct {
 	ActualHours      *float64                        `json:"actual_hours"`
 	PlannedCost      *float64                        `json:"planned_cost"`
 	ActualCost       *float64                        `json:"actual_cost"`
+	StoryPoints      *float64                        `json:"story_points"`
 	Assignees        []SubjectRef                    `json:"assignees"`
 	LabelIDs         []string                        `json:"label_ids"`
 	CustomValues     map[string]json.RawMessage      `json:"custom_values"`
@@ -405,3 +407,122 @@ type WebhookDelivery struct {
 	ErrorMessage *string   `json:"error_message"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+// Advanced Project Management Features
+
+// Task Dependencies
+type DependencyType string
+
+const (
+	DependencyFS DependencyType = "FS" // Finish-to-Start (default)
+	DependencySS DependencyType = "SS" // Start-to-Start
+	DependencyFF DependencyType = "FF" // Finish-to-Finish
+	DependencySF DependencyType = "SF" // Start-to-Finish
+)
+
+type TaskDependency struct {
+	ID             string         `json:"id"`
+	ProjectID      string         `json:"project_id"`
+	PredecessorID  string         `json:"predecessor_id"`
+	SuccessorID    string         `json:"successor_id"`
+	DependencyType DependencyType `json:"dependency_type"`
+	LagDays        int            `json:"lag_days"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+// Sprints
+const (
+	SprintStatusPlanned = "planned"
+	SprintStatusActive  = "active"
+	SprintStatusClosed  = "closed"
+)
+
+type Sprint struct {
+	ID                string    `json:"id"`
+	ProjectID         string    `json:"project_id"`
+	Name              string    `json:"name"`
+	Goal              *string   `json:"goal"`
+	StartDate         *string   `json:"start_date"`
+	EndDate           *string   `json:"end_date"`
+	Status            string    `json:"status"`
+	TaskCount         int       `json:"task_count"`
+	TotalStoryPoints  float64   `json:"total_story_points"`
+	TotalPlannedHours float64   `json:"total_planned_hours"`
+	TotalActualHours  float64   `json:"total_actual_hours"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type BurndownDataPoint struct {
+	Date                 string  `json:"date"`
+	IdealStoryPoints     float64 `json:"ideal_story_points"`
+	RemainingStoryPoints float64 `json:"remaining_story_points"`
+	IdealHours           float64 `json:"ideal_hours"`
+	RemainingHours       float64 `json:"remaining_hours"`
+}
+
+type SprintBurndown struct {
+	SprintID   string              `json:"sprint_id"`
+	SprintName string              `json:"sprint_name"`
+	StartDate  string              `json:"start_date"`
+	EndDate    string              `json:"end_date"`
+	TotalSP    float64             `json:"total_story_points"`
+	TotalHours float64             `json:"total_hours"`
+	Points     []BurndownDataPoint `json:"points"`
+}
+
+// Activity Logs
+type ActivityLog struct {
+	ID         string          `json:"id"`
+	ProjectID  string          `json:"project_id"`
+	EntityType string          `json:"entity_type"`
+	EntityID   string          `json:"entity_id"`
+	Action     string          `json:"action"`
+	Details    json.RawMessage `json:"details"`
+	ActorID    *string         `json:"actor_id"`
+	ActorName  *string         `json:"actor_name,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+// Wiki Pages
+type WikiPage struct {
+	ID        string      `json:"id"`
+	ProjectID string      `json:"project_id"`
+	Title     string      `json:"title"`
+	Slug      string      `json:"slug"`
+	Content   string      `json:"content"`
+	ParentID  *string     `json:"parent_id"`
+	SortOrder int         `json:"sort_order"`
+	CreatedBy *string     `json:"created_by"`
+	UpdatedBy *string     `json:"updated_by"`
+	Children  []*WikiPage `json:"children,omitempty"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+// Inbound Webhooks
+type InboundWebhook struct {
+	ID              string    `json:"id"`
+	ProjectID       string    `json:"project_id"`
+	Name            string    `json:"name"`
+	TokenHash       string    `json:"-"`
+	TokenPlain      string    `json:"token,omitempty"`
+	Secret          string    `json:"secret"`
+	DefaultIssueID  *string   `json:"default_issue_id"`
+	DefaultStatusID int       `json:"default_status_id"`
+	IsActive        bool      `json:"is_active"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type InboundWebhookPayload struct {
+	Title        string   `json:"title"`
+	Description  *string  `json:"description"`
+	StatusID     *string  `json:"status_id"`
+	IssueID      *string  `json:"issue_id"`
+	PlannedHours *float64 `json:"planned_hours"`
+	StoryPoints  *float64 `json:"story_points"`
+	AssigneeIDs  []string `json:"assignee_ids"`
+	LabelIDs     []string `json:"label_ids"`
+}
+

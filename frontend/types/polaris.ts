@@ -27,6 +27,8 @@ export interface User {
   avatar_url: string
   status: 'invited' | 'active' | 'disabled'
   permissions?: SystemPermissionType[]
+  mfa_enabled?: boolean
+  mfa_enforced?: boolean
   invite_url?: string
   created_at: string
   updated_at: string
@@ -38,7 +40,29 @@ export interface SystemSettings {
   default_issue_template_id?: string | null
   default_task_template_id?: string | null
   allowed_domains: string[]
+  require_mfa?: boolean
   updated_at: string
+}
+
+export interface WebAuthnCredential {
+  id: string
+  name: string
+  credential_id: string
+  attestation_type: string
+  aaguid?: string | null
+  sign_count: number
+  created_at: string
+  last_used_at?: string | null
+}
+
+export interface MFAStatus {
+  mfa_enabled: boolean
+  mfa_enforced: boolean
+  system_mfa_required: boolean
+  has_totp: boolean
+  has_webauthn: boolean
+  webauthn_credentials: WebAuthnCredential[]
+  remaining_backup_codes: number
 }
 
 export interface SMTPSettings {

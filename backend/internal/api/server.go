@@ -81,6 +81,9 @@ func (s *Server) registerRoutes() {
 
 	// Public Auth & Token Verification
 	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/verify", s.handleMFAVerify)
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/webauthn/login-options", s.handleWebAuthnLoginOptions)
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/webauthn/login-verify", s.handleWebAuthnLoginVerify)
 	s.mux.HandleFunc("GET /api/v1/auth/google/url", s.handleGoogleAuthURL)
 	s.mux.HandleFunc("POST /api/v1/auth/google/callback", s.handleGoogleCallback)
 	s.mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
@@ -94,6 +97,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/v1/auth/me/profile", s.requireAuth(s.handleUpdateMyProfile))
 	s.mux.HandleFunc("PUT /api/v1/auth/me/password", s.requireAuth(s.handleUpdateMyPassword))
 	s.mux.HandleFunc("POST /api/v1/auth/me/email-change", s.requireAuth(s.handleRequestMyEmailChange))
+	s.mux.HandleFunc("GET /api/v1/auth/mfa/status", s.requireAuth(s.handleMFAStatus))
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/totp/setup", s.requireAuth(s.handleTOTPSetup))
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/totp/enable", s.requireAuth(s.handleTOTPEnable))
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/totp/disable", s.requireAuth(s.handleTOTPDisable))
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/backup-codes/regenerate", s.requireAuth(s.handleRegenerateBackupCodes))
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/webauthn/register-options", s.requireAuth(s.handleWebAuthnRegisterOptions))
+	s.mux.HandleFunc("POST /api/v1/auth/mfa/webauthn/register-verify", s.requireAuth(s.handleWebAuthnRegisterVerify))
+	s.mux.HandleFunc("DELETE /api/v1/auth/mfa/webauthn/keys/{id}", s.requireAuth(s.handleDeleteWebAuthnKey))
 
 	// System Management & Users
 	s.mux.HandleFunc("GET /api/v1/system/settings", s.requireAuth(s.handleGetSystemSettings))
@@ -106,6 +117,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/v1/system/permissions/{id}", s.requireSystemPerm(domain.PermManageSystem, s.handleRevokeSystemPermission))
 
 	s.mux.HandleFunc("GET /api/v1/users", s.requireAuth(s.handleListUsers))
+	s.mux.HandleFunc("GET /api/v1/system/users", s.requireSystemPerm(domain.PermManageSystem, s.handleListUsers))
+	s.mux.HandleFunc("PUT /api/v1/system/users/{userId}/mfa-enforcement", s.requireSystemPerm(domain.PermManageSystem, s.handleUpdateUserMFAEnforcement))
 	s.mux.HandleFunc("POST /api/v1/users", s.requireSystemPerm(domain.PermManageSystem, s.handleCreateUser))
 	s.mux.HandleFunc("POST /api/v1/users/invite", s.requireSystemPerm(domain.PermManageSystem, s.handleInviteUser))
 	s.mux.HandleFunc("POST /api/v1/users/bulk-invite", s.requireSystemPerm(domain.PermManageSystem, s.handleBulkInviteUsers))
@@ -366,24 +379,55 @@ func (s *Server) requireScope(scope string, next http.HandlerFunc) http.HandlerF
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok := extractSessionToken(r)
+		var u *domain.User
+		var isPAT bool
+		var scopes []string
 		if strings.HasPrefix(tok, "plr_pat_") {
-			u, scopes, _, err := s.store.VerifyPAT(r.Context(), tok)
+			patUser, patScopes, _, err := s.store.VerifyPAT(r.Context(), tok)
 			if err != nil {
 				writeError(w, err)
 				return
 			}
-			ctx := context.WithValue(r.Context(), userContextKey, u)
-			ctx = context.WithValue(ctx, patScopesContextKey, scopes)
-			next(w, r.WithContext(ctx))
-			return
+			u = patUser
+			isPAT = true
+			scopes = patScopes
+		} else {
+			sessionUser, err := s.store.GetUserBySessionToken(r.Context(), tok)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			u = sessionUser
 		}
 
-		u, err := s.store.GetUserBySessionToken(r.Context(), tok)
-		if err != nil {
-			writeError(w, err)
-			return
+		if !u.MFAEnabled {
+			path := r.URL.Path
+			isAllowed := path == "/api/v1/auth/me" ||
+				path == "/api/v1/users/me" ||
+				path == "/api/v1/auth/logout" ||
+				strings.HasPrefix(path, "/api/v1/auth/mfa/")
+			if !isAllowed {
+				enforced := u.MFAEnforced
+				if !enforced {
+					st, err := s.store.GetSystemSettings(r.Context())
+					if err == nil && st != nil && st.RequireMFA {
+						enforced = true
+					}
+				}
+				if enforced {
+					writeJSON(w, http.StatusForbidden, map[string]any{
+						"error":   "MFA_SETUP_REQUIRED",
+						"message": "Multi-Factor Authentication setup is required",
+					})
+					return
+				}
+			}
 		}
+
 		ctx := context.WithValue(r.Context(), userContextKey, u)
+		if isPAT {
+			ctx = context.WithValue(ctx, patScopesContextKey, scopes)
+		}
 		next(w, r.WithContext(ctx))
 	}
 }

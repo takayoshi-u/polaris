@@ -78,6 +78,10 @@ components:
           items:
             type: string
             enum: [create_project, delete_project, manage_system]
+        mfa_enabled:
+          type: boolean
+        mfa_enforced:
+          type: boolean
         created_at:
           type: string
           format: date-time
@@ -110,6 +114,9 @@ components:
           maxItems: 10
           items:
             type: string
+        require_mfa:
+          type: boolean
+          description: システム全体での2要素認証（MFA）強制有効フラグ
         updated_at:
           type: string
           format: date-time
@@ -1060,6 +1067,51 @@ components:
           items:
             $ref: '#/components/schemas/BulkInviteFailure'
 
+    WebAuthnCredential:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        credential_id:
+          type: string
+        attestation_type:
+          type: string
+        aaguid:
+          type: string
+          nullable: true
+        sign_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    MFAStatus:
+      type: object
+      properties:
+        mfa_enabled:
+          type: boolean
+        mfa_enforced:
+          type: boolean
+        system_mfa_required:
+          type: boolean
+        has_totp:
+          type: boolean
+        has_webauthn:
+          type: boolean
+        webauthn_credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebAuthnCredential'
+        remaining_backup_codes:
+          type: integer
+
 paths:
   /health:
     get:
@@ -1113,7 +1165,168 @@ paths:
                 password: { type: string }
       responses:
         '200':
-          description: ログイン成功
+          description: ログイン成功またはMFAチャレンジ要求（mfa_required=true）
+
+  /auth/mfa/verify:
+    post:
+      summary: MFA検証（TOTPまたはバックアップコードによるセッション発行）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [temp_token, method, code]
+              properties:
+                temp_token: { type: string }
+                method: { type: string, enum: [totp, backup_code] }
+                code: { type: string }
+      responses:
+        '200':
+          description: MFA検証成功およびセッションクッキー発行
+
+  /auth/mfa/status:
+    get:
+      summary: 現在のMFA設定ステータス・キー一覧取得
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MFAStatus'
+
+  /auth/mfa/totp/setup:
+    post:
+      summary: TOTPセットアップ用シークレット及びQRコード用URI生成
+      responses:
+        '200':
+          description: シークレット及びotpauth URL
+
+  /auth/mfa/totp/enable:
+    post:
+      summary: 初回TOTP検証および有効化（バックアップコード8件返却）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret, code]
+              properties:
+                secret: { type: string }
+                code: { type: string }
+      responses:
+        '200':
+          description: TOTP有効化完了
+
+  /auth/mfa/totp/disable:
+    post:
+      summary: パスワード検証によるTOTP無効化
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string }
+      responses:
+        '200':
+          description: TOTP無効化完了
+
+  /auth/mfa/backup-codes/regenerate:
+    post:
+      summary: バックアップコード（8件）の再生成
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string }
+      responses:
+        '200':
+          description: 新規バックアップコード一覧
+
+  /auth/mfa/webauthn/register-options:
+    post:
+      summary: WebAuthn / セキュリティキー登録オプション取得
+      responses:
+        '200':
+          description: PublicKeyCredentialCreationOptions
+
+  /auth/mfa/webauthn/register-verify:
+    post:
+      summary: WebAuthn アテステーション検証・公開鍵登録
+      responses:
+        '200':
+          description: 登録完了
+
+  /auth/mfa/webauthn/login-options:
+    post:
+      summary: WebAuthn ログインアサーションオプション取得
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [temp_token]
+              properties:
+                temp_token: { type: string }
+      responses:
+        '200':
+          description: PublicKeyCredentialRequestOptions
+
+  /auth/mfa/webauthn/login-verify:
+    post:
+      summary: WebAuthn アサーション署名検証・ログイン完了
+      security: []
+      responses:
+        '200':
+          description: ログイン成功およびセッション発行
+
+  /auth/mfa/webauthn/keys/{id}:
+    delete:
+      summary: 登録済みWebAuthnセキュリティキーの削除
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 削除完了
+
+  /system/users/{userId}/mfa-enforcement:
+    put:
+      summary: ユーザー個別での2要素認証（MFA）強制フラグの更新
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_enforced]
+              properties:
+                mfa_enforced: { type: boolean }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
 
   /auth/google/url:
     get:

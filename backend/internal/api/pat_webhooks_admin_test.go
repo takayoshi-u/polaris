@@ -435,9 +435,9 @@ func (s *mockStmt) Query(args []driver.Value) (driver.Rows, error) {
 
 	case strings.Contains(q, "FROM system_settings"):
 		// GetSystemSettings
-		cols := []string{"id", "default_hours_per_day", "default_issue_template_id", "default_task_template_id", "updated_at"}
+		cols := []string{"id", "default_hours_per_day", "default_issue_template_id", "default_task_template_id", "require_mfa", "updated_at"}
 		values := [][]driver.Value{{
-			st.settings.ID, st.settings.DefaultHoursPerDay, nil, nil, st.settings.UpdatedAt,
+			st.settings.ID, st.settings.DefaultHoursPerDay, nil, nil, st.settings.RequireMFA, st.settings.UpdatedAt,
 		}}
 		return &mockRows{cols: cols, rows: values}, nil
 

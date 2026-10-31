@@ -299,6 +299,15 @@
               >
                 APIトークン (PAT)
               </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="accountTab === 'mfa' ? 'btn-primary' : 'btn-ghost'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="accountTab = 'mfa'; loadMFAStatus()"
+              >
+                🔐 2要素認証 (MFA)
+              </button>
             </div>
           </div>
           <button class="btn btn-danger btn-sm" @click="logout">ログアウト</button>
@@ -488,15 +497,393 @@
             </div>
           </form>
         </div>
+
+        <!-- TAB 3: 2-FACTOR AUTHENTICATION (MFA) -->
+        <div v-else-if="accountTab === 'mfa'" style="display: flex; flex-direction: column; gap: 16px;">
+          <!-- MFA Status Banner -->
+          <div
+            style="padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 10px;"
+            :style="{ backgroundColor: mfaStatus?.mfa_enabled ? 'rgba(22, 163, 74, 0.08)' : 'rgba(245, 158, 11, 0.08)' }"
+          >
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <ShieldCheck v-if="mfaStatus?.mfa_enabled" :size="20" style="color: var(--success);" />
+              <ShieldAlert v-else :size="20" style="color: var(--warning);" />
+              <div>
+                <div style="font-size: 13px; font-weight: 700;">
+                  {{ mfaStatus?.mfa_enabled ? '2要素認証は有効です' : '2要素認証は未設定です' }}
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted);">
+                  {{ (mfaStatus?.mfa_enforced || mfaStatus?.system_mfa_required) ? '⚠️ セキュリティポリシーによりMFAが必須化されています' : 'ログイン時のセキュリティを高めるためMFAの設定を推奨します' }}
+                </div>
+              </div>
+            </div>
+            <span :class="['badge', mfaStatus?.mfa_enabled ? 'badge-green' : 'badge-amber']" style="font-size: 11px;">
+              {{ mfaStatus?.mfa_enabled ? '有効' : '未設定' }}
+            </span>
+          </div>
+
+          <!-- Section 1: TOTP (Authenticator App) -->
+          <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <Smartphone :size="16" style="color: var(--primary);" />
+                <h4 style="font-size: 13px; font-weight: 700;">認証アプリ (TOTP)</h4>
+              </div>
+              <span v-if="mfaStatus?.has_totp" class="badge badge-green" style="font-size: 10px;">設定済み ✅</span>
+              <span v-else class="badge badge-slate" style="font-size: 10px;">未設定</span>
+            </div>
+
+            <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+              Google Authenticator、1Password等の認証アプリで生成される6桁のワンタイムパスコードを利用します。
+            </p>
+
+            <!-- Not Setup: Button to start setup -->
+            <div v-if="!mfaStatus?.has_totp && !showTotpSetupCard">
+              <button type="button" class="btn btn-primary btn-sm" @click="startTOTPSetup">
+                認証アプリを設定する
+              </button>
+            </div>
+
+            <!-- Setup Card in progress -->
+            <div
+              v-else-if="!mfaStatus?.has_totp && showTotpSetupCard"
+              style="padding: 12px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 12px;"
+            >
+              <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                1. 認証アプリで以下のQRコードをスキャンするか、シークレットキーを手動入力してください。
+              </div>
+
+              <!-- QR Code Image -->
+              <div style="display: flex; justify-content: center;">
+                <img
+                  :src="'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(totpSetupData.otpauth_url)"
+                  alt="TOTP QR Code"
+                  style="width: 170px; height: 170px; border-radius: 8px; border: 1px solid var(--border-color); background: #fff; padding: 6px;"
+                />
+              </div>
+
+              <!-- Monospace Secret Key -->
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                <div style="font-size: 11px; color: var(--text-muted);">シークレットキー（手動入力用）:</div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <code style="font-size: 13px; font-family: monospace; letter-spacing: 0.1em; background: var(--bg-card); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    {{ totpSetupData.secret }}
+                  </code>
+                  <button type="button" class="btn btn-secondary btn-sm" style="padding: 3px 8px; font-size: 11px;" @click="copyToken(totpSetupData.secret)">
+                    コピー
+                  </button>
+                </div>
+              </div>
+
+              <!-- Step 2: Verification Code -->
+              <div style="display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                <div style="font-size: 12px; font-weight: 600;">2. 認証アプリに表示されている6桁コードを入力して有効化:</div>
+                <div style="display: flex; gap: 8px;">
+                  <input
+                    v-model="totpConfirmCode"
+                    type="text"
+                    maxlength="6"
+                    pattern="[0-9]*"
+                    inputmode="numeric"
+                    placeholder="123456"
+                    style="flex: 1; text-align: center; font-size: 18px; font-family: monospace; letter-spacing: 0.2em;"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    :disabled="totpConfirmCode.length !== 6 || isEnablingTotp"
+                    @click="confirmEnableTOTP"
+                  >
+                    {{ isEnablingTotp ? '有効化中...' : '有効化する' }}
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="showTotpSetupCard = false">
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Already Setup: Disable Button -->
+            <div v-else-if="mfaStatus?.has_totp" style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+              <span style="font-size: 12px; color: var(--text-muted);">
+                {{ (mfaStatus?.mfa_enforced || mfaStatus?.system_mfa_required) ? '※ 管理者ポリシーによりMFAが必須化されているため無効化できません' : '認証アプリによる2要素認証が有効です' }}
+              </span>
+              <button
+                type="button"
+                class="btn btn-danger btn-sm"
+                :disabled="Boolean(mfaStatus?.mfa_enforced || mfaStatus?.system_mfa_required)"
+                @click="showDisableTotpModal = true"
+              >
+                無効化
+              </button>
+            </div>
+          </div>
+
+          <!-- Section 2: WebAuthn / Security Key (FIDO2) -->
+          <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <Key :size="16" style="color: var(--primary);" />
+                <h4 style="font-size: 13px; font-weight: 700;">セキュリティキー / FIDO2 (WebAuthn)</h4>
+              </div>
+              <span class="badge badge-slate" style="font-size: 10px;">{{ mfaStatus?.webauthn_credentials?.length || 0 }}件登録</span>
+            </div>
+
+            <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+              YubiKey等の物理セキュリティキーや、Touch ID、Windows Hello等の生体認証を利用して素早くログインできます。
+            </p>
+
+            <!-- Register New Security Key Form -->
+            <div style="display: flex; gap: 8px;">
+              <input
+                v-model="newWebAuthnKeyName"
+                type="text"
+                placeholder="キーの名称（例: MacBook Touch ID, YubiKey 5C）"
+                style="flex: 1; font-size: 13px;"
+              />
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                :disabled="!newWebAuthnKeyName.trim() || isRegisteringWebAuthn"
+                @click="registerWebAuthnKey"
+              >
+                {{ isRegisteringWebAuthn ? 'キー待機中...' : '＋ セキュリティキーを登録' }}
+              </button>
+            </div>
+
+            <!-- Registered Keys List -->
+            <div v-if="mfaStatus?.webauthn_credentials && mfaStatus.webauthn_credentials.length > 0" style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+              <div
+                v-for="k in mfaStatus.webauthn_credentials"
+                :key="k.id"
+                style="padding: 8px 10px; border-radius: 6px; background: var(--bg-elevated); border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 8px;"
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <Key :size="14" style="color: var(--primary);" />
+                  <strong style="font-size: 13px;">{{ k.name }}</strong>
+                  <span style="font-size: 11px; color: var(--text-muted);">
+                    登録: {{ k.created_at.slice(0, 10) }} {{ k.last_used_at ? '・ 最終利用: ' + k.last_used_at.slice(0, 10) : '' }}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  style="color: var(--danger); padding: 2px 6px;"
+                  title="セキュリティキーを削除"
+                  @click="deleteWebAuthnKey(k)"
+                >
+                  <Trash2 :size="14" />
+                </button>
+              </div>
+            </div>
+            <div v-else style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 8px 0;">
+              登録されているセキュリティキーはありません
+            </div>
+          </div>
+
+          <!-- Section 3: Backup Codes Management -->
+          <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="font-size: 13px; font-weight: 700;">🎫 バックアップコード管理</div>
+              <span class="badge badge-purple" style="font-size: 10px;">残り {{ mfaStatus?.remaining_backup_codes ?? 0 }} 件</span>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+              端末の故障・紛失時にアカウントを復旧するための使い捨てコードです。安全な場所に保存してください。
+            </p>
+            <div style="display: flex; justify-content: flex-end;">
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                @click="regenerateBackupCodes"
+              >
+                バックアップコードを再生成
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Backup Codes Display Modal -->
+    <div v-if="showBackupCodesModal" class="modal-backdrop" @click.self="showBackupCodesModal = false">
+      <div class="modal-panel" style="max-width: 480px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">🎫 バックアップコードが発行されました</h3>
+        <p style="font-size: 12px; color: var(--danger); margin-bottom: 12px; font-weight: 600;">
+          ⚠️ これらのコードは二度と表示されません。今すぐコピーして安全なパスワードマネージャー等に保存してください。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; background: var(--bg-elevated); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+          <div
+            v-for="(c, idx) in newlyGeneratedBackupCodes"
+            :key="idx"
+            style="font-family: monospace; font-size: 14px; letter-spacing: 0.1em; text-align: center; background: var(--bg-card); padding: 6px; border-radius: 4px; border: 1px solid var(--border-color);"
+          >
+            {{ c }}
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" class="btn btn-secondary btn-sm" @click="copyBackupCodes">
+            コード一覧をコピー
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" @click="showBackupCodesModal = false">
+            安全に保存しました
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Disable TOTP Password Prompt Modal -->
+    <div v-if="showDisableTotpModal" class="modal-backdrop" @click.self="showDisableTotpModal = false">
+      <div class="modal-panel" style="max-width: 420px;">
+        <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 8px;">認証アプリ (TOTP) の無効化</h3>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          本人確認のため、現在のログインパスワードを入力してください。
+        </p>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="disableTOTP">
+          <input
+            v-model="disableTotpPassword"
+            type="password"
+            required
+            placeholder="現在のパスワード"
+            style="width: 100%;"
+          />
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-secondary btn-sm" @click="showDisableTotpModal = false">
+              キャンセル
+            </button>
+            <button type="submit" class="btn btn-danger btn-sm" :disabled="isDisablingTotp">
+              {{ isDisablingTotp ? '無効化中...' : '無効化を実行' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Mandatory MFA Enforcement Blocking Modal (Requirement 4) -->
+    <div
+      v-if="isMfaEnforcedPending"
+      class="modal-backdrop"
+      style="z-index: 9999; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(4px);"
+    >
+      <div class="modal-panel" style="max-width: 560px; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+          <div style="width: 38px; height: 38px; border-radius: 8px; background: #dc2626; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            <ShieldAlert :size="22" />
+          </div>
+          <div>
+            <h3 style="font-size: 16px; font-weight: 700; color: var(--danger);">⚠️ 2要素認証（MFA）の設定が必要です</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+              セキュリティポリシーにより、2要素認証の設定が義務付けられています。設定を完了するまで操作が制限されます。
+            </p>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <!-- Choice: Setup TOTP or WebAuthn -->
+          <div style="display: flex; gap: 6px; padding: 2px; border-radius: 6px; background: var(--bg-elevated); border: 1px solid var(--border-color);">
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="enforcedSetupTab === 'totp' ? 'btn-primary' : 'btn-ghost'"
+              style="flex: 1; font-size: 12px;"
+              @click="enforcedSetupTab = 'totp'"
+            >
+              <Smartphone :size="13" /> 認証アプリ (TOTP)
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="enforcedSetupTab === 'webauthn' ? 'btn-primary' : 'btn-ghost'"
+              style="flex: 1; font-size: 12px;"
+              @click="enforcedSetupTab = 'webauthn'"
+            >
+              <Key :size="13" /> セキュリティキー
+            </button>
+          </div>
+
+          <!-- Enforced TOTP Tab -->
+          <div v-if="enforcedSetupTab === 'totp'" style="display: flex; flex-direction: column; gap: 10px;">
+            <div v-if="!showTotpSetupCard">
+              <p style="font-size: 12px; color: var(--text-secondary);">
+                Google Authenticator、1Password等のアプリで二段階認証を設定します。
+              </p>
+              <button type="button" class="btn btn-primary btn-sm" @click="startTOTPSetup">
+                認証アプリを設定する
+              </button>
+            </div>
+            <div v-else style="display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; justify-content: center;">
+                <img
+                  :src="'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(totpSetupData.otpauth_url)"
+                  alt="TOTP QR Code"
+                  style="width: 160px; height: 160px; border-radius: 8px; border: 1px solid var(--border-color); background: #fff; padding: 6px;"
+                />
+              </div>
+              <div style="display: flex; justify-content: center; align-items: center; gap: 6px;">
+                <code style="font-size: 12px; font-family: monospace; background: var(--bg-elevated); padding: 3px 8px; border-radius: 4px;">{{ totpSetupData.secret }}</code>
+                <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px;" @click="copyToken(totpSetupData.secret)">コピー</button>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <input
+                  v-model="totpConfirmCode"
+                  type="text"
+                  maxlength="6"
+                  pattern="[0-9]*"
+                  inputmode="numeric"
+                  placeholder="6桁コード"
+                  style="flex: 1; text-align: center; font-size: 18px; font-family: monospace; letter-spacing: 0.2em;"
+                />
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  :disabled="totpConfirmCode.length !== 6 || isEnablingTotp"
+                  @click="confirmEnableTOTP"
+                >
+                  {{ isEnablingTotp ? '有効化中...' : '有効化して開始' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Enforced WebAuthn Tab -->
+          <div v-else-if="enforcedSetupTab === 'webauthn'" style="display: flex; flex-direction: column; gap: 10px;">
+            <p style="font-size: 12px; color: var(--text-secondary);">
+              YubiKey、Touch ID等のセキュリティキーを登録して二段階認証を有効化します。
+            </p>
+            <div style="display: flex; gap: 8px;">
+              <input
+                v-model="newWebAuthnKeyName"
+                type="text"
+                placeholder="キーの名称（例: MacBook Touch ID）"
+                style="flex: 1; font-size: 13px;"
+              />
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                :disabled="!newWebAuthnKeyName.trim() || isRegisteringWebAuthn"
+                @click="registerWebAuthnKey"
+              >
+                {{ isRegisteringWebAuthn ? 'キー待機中...' : '登録して有効化' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 14px;">
+          <span style="font-size: 11px; color: var(--text-muted);">設定を完了するとこの画面は自動的に閉じられます</span>
+          <button type="button" class="btn btn-danger btn-sm" @click="logout">ログアウト</button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Bell, FolderKanban, LayoutGrid, Menu, Plus, Settings, ShieldCheck } from 'lucide-vue-next'
-import type { NotificationItem, PersonalAccessToken } from '~/types/polaris'
+import { Bell, FolderKanban, Key, LayoutGrid, Menu, Plus, Settings, ShieldAlert, ShieldCheck, Smartphone, Trash2 } from 'lucide-vue-next'
+import type { MFAStatus, NotificationItem, PersonalAccessToken, WebAuthnCredential } from '~/types/polaris'
 import { formatHours, formatJSTDateTime, hasAtMostTwoDecimals } from '~/utils/format'
+import { isWebAuthnSupported, performWebAuthnRegister } from '~/utils/webauthn'
 
 const route = useRoute()
 const router = useRouter()
@@ -556,7 +943,7 @@ const passwordForm = reactive({
   new_password: ''
 })
 
-const accountTab = ref<'profile' | 'pat'>('profile')
+const accountTab = ref<'profile' | 'pat' | 'mfa'>('profile')
 const patList = ref<PersonalAccessToken[]>([])
 const newPlainToken = ref('')
 const newPatForm = reactive({
@@ -564,6 +951,163 @@ const newPatForm = reactive({
   expires_in_days: 90,
   scopes: ['read:projects', 'read:tasks', 'write:tasks', 'read:issues', 'write:issues']
 })
+
+// MFA Management State
+const mfaStatus = ref<MFAStatus | null>(null)
+const isLoadingMfa = ref(false)
+const showTotpSetupCard = ref(false)
+const totpSetupData = reactive({ secret: '', otpauth_url: '' })
+const totpConfirmCode = ref('')
+const isEnablingTotp = ref(false)
+const showDisableTotpModal = ref(false)
+const disableTotpPassword = ref('')
+const isDisablingTotp = ref(false)
+const newWebAuthnKeyName = ref('')
+const isRegisteringWebAuthn = ref(false)
+const showBackupCodesModal = ref(false)
+const newlyGeneratedBackupCodes = ref<string[]>([])
+const enforcedSetupTab = ref<'totp' | 'webauthn'>('totp')
+
+const isMfaEnforcedPending = computed(() => {
+  if (isPublicRoute.value || !currentUser.value) return false
+  const enforced = Boolean(currentUser.value.mfa_enforced || mfaStatus.value?.system_mfa_required || mfaStatus.value?.mfa_enforced)
+  return enforced && !currentUser.value.mfa_enabled && !mfaStatus.value?.mfa_enabled
+})
+
+async function loadMFAStatus() {
+  if (isPublicRoute.value || !currentUser.value) return
+  isLoadingMfa.value = true
+  try {
+    mfaStatus.value = await apiFetch<MFAStatus>('/auth/mfa/status')
+  } catch {
+    mfaStatus.value = null
+  } finally {
+    isLoadingMfa.value = false
+  }
+}
+
+async function startTOTPSetup() {
+  try {
+    const res = await apiFetch<{ secret: string; otpauth_url: string }>('/auth/mfa/totp/setup', { method: 'POST' })
+    totpSetupData.secret = res.secret
+    totpSetupData.otpauth_url = res.otpauth_url
+    totpConfirmCode.value = ''
+    showTotpSetupCard.value = true
+  } catch (e: any) {
+    notifyToast(e.message || '認証アプリのセットアップ開始に失敗しました', 'error')
+  }
+}
+
+async function confirmEnableTOTP() {
+  if (totpConfirmCode.value.length !== 6 || isEnablingTotp.value) return
+  isEnablingTotp.value = true
+  try {
+    const res = await apiFetch<{ status: string; backup_codes: string[] }>('/auth/mfa/totp/enable', {
+      method: 'POST',
+      body: JSON.stringify({
+        secret: totpSetupData.secret,
+        code: totpConfirmCode.value.trim()
+      })
+    })
+    showTotpSetupCard.value = false
+    totpConfirmCode.value = ''
+    notifyToast('認証アプリ (TOTP) を有効化しました', 'success')
+    await refreshCurrentUser()
+    await loadMFAStatus()
+    if (res.backup_codes && res.backup_codes.length > 0) {
+      newlyGeneratedBackupCodes.value = res.backup_codes
+      showBackupCodesModal.value = true
+    }
+  } catch (e: any) {
+    notifyToast(e.message || '認証コードが正しくありません', 'error')
+  } finally {
+    isEnablingTotp.value = false
+  }
+}
+
+async function disableTOTP() {
+  if (!disableTotpPassword.value || isDisablingTotp.value) return
+  isDisablingTotp.value = true
+  try {
+    await apiFetch('/auth/mfa/totp/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password: disableTotpPassword.value })
+    })
+    showDisableTotpModal.value = false
+    disableTotpPassword.value = ''
+    notifyToast('認証アプリ (TOTP) を無効化しました', 'success')
+    await refreshCurrentUser()
+    await loadMFAStatus()
+  } catch (e: any) {
+    notifyToast(e.message || '無効化に失敗しました。パスワードをご確認ください', 'error')
+  } finally {
+    isDisablingTotp.value = false
+  }
+}
+
+async function registerWebAuthnKey() {
+  if (!newWebAuthnKeyName.value.trim() || isRegisteringWebAuthn.value) return
+  isRegisteringWebAuthn.value = true
+  try {
+    const opts = await apiFetch<any>('/auth/mfa/webauthn/register-options', { method: 'POST' })
+    const attestation = await performWebAuthnRegister(opts)
+    const res = await apiFetch<{ status: string; backup_codes?: string[] }>('/auth/mfa/webauthn/register-verify', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: newWebAuthnKeyName.value.trim(),
+        ...attestation
+      })
+    })
+    newWebAuthnKeyName.value = ''
+    notifyToast('セキュリティキーを登録しました', 'success')
+    await refreshCurrentUser()
+    await loadMFAStatus()
+    if (res.backup_codes && res.backup_codes.length > 0) {
+      newlyGeneratedBackupCodes.value = res.backup_codes
+      showBackupCodesModal.value = true
+    }
+  } catch (e: any) {
+    notifyToast(e.message || 'セキュリティキーの登録に失敗しました', 'error')
+  } finally {
+    isRegisteringWebAuthn.value = false
+  }
+}
+
+async function deleteWebAuthnKey(key: WebAuthnCredential) {
+  if (!confirm(`セキュリティキー「${key.name}」を削除しますか？`)) return
+  try {
+    await apiFetch(`/auth/mfa/webauthn/keys/${key.id}`, { method: 'DELETE' })
+    notifyToast('セキュリティキーを削除しました', 'success')
+    await refreshCurrentUser()
+    await loadMFAStatus()
+  } catch (e: any) {
+    notifyToast(e.message || 'セキュリティキーの削除に失敗しました', 'error')
+  }
+}
+
+async function regenerateBackupCodes() {
+  if (!confirm('新しいバックアップコード8件を再生成しますか？\n（以前のコードはすべて無効化されます）')) return
+  try {
+    const res = await apiFetch<{ backup_codes: string[] }>('/auth/mfa/backup-codes/regenerate', {
+      method: 'POST',
+      body: JSON.stringify({ password: '' })
+    })
+    await loadMFAStatus()
+    if (res.backup_codes && res.backup_codes.length > 0) {
+      newlyGeneratedBackupCodes.value = res.backup_codes
+      showBackupCodesModal.value = true
+    }
+    notifyToast('バックアップコードを再生成しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message || 'バックアップコードの再生成に失敗しました', 'error')
+  }
+}
+
+function copyBackupCodes() {
+  if (!newlyGeneratedBackupCodes.value.length) return
+  const text = newlyGeneratedBackupCodes.value.join('\n')
+  copyToken(text)
+}
 
 async function loadPATs() {
   try {
@@ -636,7 +1180,7 @@ onMounted(async () => {
     router.replace('/login')
     return
   }
-  await Promise.all([refreshProjects(), refreshNotifications()])
+  await Promise.all([refreshProjects(), refreshNotifications(), loadMFAStatus()])
   registerPushNotifications()
 })
 
@@ -648,7 +1192,7 @@ watch(() => route.path, async (newPath) => {
         router.replace('/login')
         return
       }
-      await Promise.all([refreshProjects(), refreshNotifications()])
+      await Promise.all([refreshProjects(), refreshNotifications(), loadMFAStatus()])
     }
   }
 })
@@ -760,6 +1304,7 @@ function openAccountModal() {
   passwordForm.new_password = ''
   emailChangeForm.new_email = ''
   emailChangeForm.current_password = ''
+  loadMFAStatus()
   showAccountModal.value = true
 }
 

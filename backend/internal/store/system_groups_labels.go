@@ -64,9 +64,9 @@ func (s *Store) GetSystemSettings(ctx context.Context) (*domain.SystemSettings, 
 	var st domain.SystemSettings
 	var issueTpl, taskTpl sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, default_hours_per_day, default_issue_template_id, default_task_template_id, updated_at
+		SELECT id, default_hours_per_day, default_issue_template_id, default_task_template_id, require_mfa, updated_at
 		FROM system_settings LIMIT 1
-	`).Scan(&st.ID, &st.DefaultHoursPerDay, &issueTpl, &taskTpl, &st.UpdatedAt)
+	`).Scan(&st.ID, &st.DefaultHoursPerDay, &issueTpl, &taskTpl, &st.RequireMFA, &st.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (s *Store) GetSystemSettings(ctx context.Context) (*domain.SystemSettings, 
 	return &st, nil
 }
 
-func (s *Store) UpdateSystemSettings(ctx context.Context, defaultHoursPerDay float64, defaultIssueTplID, defaultTaskTplID *string, allowedDomains *[]string) (*domain.SystemSettings, error) {
+func (s *Store) UpdateSystemSettings(ctx context.Context, defaultHoursPerDay float64, defaultIssueTplID, defaultTaskTplID *string, allowedDomains *[]string, requireMFA *bool) (*domain.SystemSettings, error) {
 	if err := domain.ValidateHoursPerDay(defaultHoursPerDay, "default_hours_per_day"); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
@@ -99,8 +99,9 @@ func (s *Store) UpdateSystemSettings(ctx context.Context, defaultHoursPerDay flo
 		SET default_hours_per_day = $1,
 		    default_issue_template_id = COALESCE($2, default_issue_template_id),
 		    default_task_template_id = COALESCE($3, default_task_template_id),
-		    updated_at = $4
-	`, defaultHoursPerDay, defaultIssueTplID, defaultTaskTplID, now)
+		    require_mfa = COALESCE($4, require_mfa),
+		    updated_at = $5
+	`, defaultHoursPerDay, defaultIssueTplID, defaultTaskTplID, requireMFA, now)
 	if err != nil {
 		return nil, err
 	}

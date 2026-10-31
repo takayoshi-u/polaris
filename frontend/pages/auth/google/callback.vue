@@ -18,10 +18,14 @@ onMounted(async () => {
     return
   }
   try {
-    await apiFetch('/auth/google/callback', {
+    const res = await apiFetch<any>('/auth/google/callback', {
       method: 'POST',
       body: JSON.stringify({ code })
     })
+    if (res?.mfa_required && res?.temp_token) {
+      router.replace(`/login?mfa_temp_token=${encodeURIComponent(res.temp_token)}`)
+      return
+    }
     await refreshCurrentUser()
     notifyToast('Google アカウントでログインしました', 'success')
     router.replace('/')

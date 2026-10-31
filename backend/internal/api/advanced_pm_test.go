@@ -2,6 +2,9 @@ package api
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -365,8 +368,25 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	if inHook.TokenPlain == "" {
 		t.Fatalf("expected generated token for inbound webhook")
 	}
+	if inHook.Secret == "" {
+		t.Fatalf("expected generated secret for inbound webhook on create")
+	}
 
-	// Test triggering the public webhook receiver with that token
+	// Verify secret masking in ListInboundWebhooks
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/inbound-webhooks", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to list inbound webhooks (%d)", rec.Code)
+	}
+	var listHooks []domain.InboundWebhook
+	_ = json.NewDecoder(rec.Body).Decode(&listHooks)
+	if len(listHooks) != 1 || listHooks[0].Secret != "" {
+		t.Fatalf("expected inbound webhook secret to be masked in list response, got %q", listHooks[0].Secret)
+	}
+
+	// Test triggering the public webhook receiver with valid token (no signature)
 	hookPayload, _ := json.Marshal(map[string]any{
 		"title":       "Bug reported via Inbound Webhook",
 		"description": "Details from crash reporter",
@@ -384,10 +404,135 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 		t.Fatalf("unexpected task title: %s", webhookCreatedTask.Title)
 	}
 
+	// Test HMAC-SHA256 signature verification (invalid signature -> 401)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/inbound-webhooks/%s", inHook.TokenPlain), bytes.NewReader(hookPayload))
+	req.Header.Set("X-Polaris-Signature", "sha256=invalidhexsignature0000000000000000000000000000000000000000000000")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid HMAC signature, got %d", rec.Code)
+	}
+
+	// Test HMAC-SHA256 signature verification (valid signature -> 201)
+	mac := hmac.New(sha256.New, []byte(inHook.Secret))
+	mac.Write(hookPayload)
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/inbound-webhooks/%s", inHook.TokenPlain), bytes.NewReader(hookPayload))
+	req.Header.Set("X-Polaris-Signature", "sha256="+expectedSig)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for valid HMAC signature, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Test HMAC-SHA256 signature verification with X-Signature-256 header
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/inbound-webhooks/%s", inHook.TokenPlain), bytes.NewReader(hookPayload))
+	req.Header.Set("X-Signature-256", expectedSig)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for valid X-Signature-256 header, got %d: %s", rec.Code, rec.Body.String())
+	}
+
 	// ==========================================
-	// Feature F: CSV Export & Import
+	// Feature F: IDOR & Project Boundary Validation
 	// ==========================================
-	// Export CSV
+	// Create Project 2
+	proj2Body, _ := json.Marshal(map[string]any{
+		"key":         "PR2",
+		"name":        "Project 2",
+		"description": "Second project for boundary testing",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(proj2Body))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var proj2 domain.Project
+	_ = json.NewDecoder(rec.Body).Decode(&proj2)
+
+	// Create issue in Project 2
+	issue2Body, _ := json.Marshal(map[string]any{
+		"title": "Project 2 Issue",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/issues", proj2.ID), bytes.NewReader(issue2Body))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var issue2 domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&issue2)
+
+	// Create wiki in Project 2
+	wiki2Body, _ := json.Marshal(map[string]any{
+		"title":   "Project 2 Wiki",
+		"slug":    "proj2-wiki",
+		"content": "Secret doc in project 2",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/wiki", proj2.ID), bytes.NewReader(wiki2Body))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var wiki2 domain.WikiPage
+	_ = json.NewDecoder(rec.Body).Decode(&wiki2)
+
+	// Inbound webhook in Project 1 with default_issue_id from Project 2 -> reject
+	crossHookBody, _ := json.Marshal(map[string]any{
+		"name":              "Cross Project Webhook",
+		"default_issue_id":  issue2.ID,
+		"default_status_id": defaultStatusID,
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/inbound-webhooks", proj.ID), bytes.NewReader(crossHookBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cross-project default_issue_id, got %d", rec.Code)
+	}
+
+	// Create Wiki in Project 1 with parent_id from Project 2 -> reject
+	crossWikiBody, _ := json.Marshal(map[string]any{
+		"title":     "Cross Project Child Wiki",
+		"slug":      "cross-child",
+		"content":   "test",
+		"parent_id": wiki2.ID,
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/wiki", proj.ID), bytes.NewReader(crossWikiBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cross-project wiki parent_id on create, got %d", rec.Code)
+	}
+
+	// Update Wiki in Project 1 with parent_id from Project 2 -> reject
+	crossUpWikiBody, _ := json.Marshal(map[string]any{
+		"parent_id": wiki2.ID,
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/wiki/%s", wiki.ID), bytes.NewReader(crossUpWikiBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cross-project wiki parent_id on update, got %d", rec.Code)
+	}
+
+	// ==========================================
+	// Feature G: CSV Export, Formula Injection & Import
+	// ==========================================
+	// Create task with potentially malicious formula characters
+	formulaTaskBody, _ := json.Marshal(map[string]any{
+		"title":     "=cmd|' /C calc'!A0",
+		"status_id": defaultStatusID,
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/issues/%s/tasks", issue.ID), bytes.NewReader(formulaTaskBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create formula task: %s", rec.Body.String())
+	}
+
+	// Export CSV and verify formula sanitization
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/export/csv", proj.ID), nil)
 	req.AddCookie(cookie)
 	rec = httptest.NewRecorder()
@@ -398,6 +543,10 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	csvContent := rec.Body.String()
 	if !bytes.Contains([]byte(csvContent), []byte("Task Title")) {
 		t.Fatalf("expected Task Title in CSV export header, got: %s", csvContent)
+	}
+	// Verify sanitized cell with prepended single quote
+	if !bytes.Contains([]byte(csvContent), []byte("'=cmd|' /C calc'!A0")) {
+		t.Fatalf("expected CSV formula sanitization to prepend single quote, got: %s", csvContent)
 	}
 
 	// Import CSV with a new task
@@ -415,6 +564,53 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&importRes)
 	if importRes.ImportedTasks != 1 {
 		t.Fatalf("expected 1 task imported, got %d (errors: %v)", importRes.ImportedTasks, importRes.Errors)
+	}
+
+	// ==========================================
+	// Feature H: PAT Scope Enforcement
+	// ==========================================
+	// Create PAT with only read:projects scope
+	patBody, _ := json.Marshal(map[string]any{
+		"name":   "ReadOnly PAT",
+		"scopes": []string{"read:projects"},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/user/tokens", bytes.NewReader(patBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create PAT (%d): %s", rec.Code, rec.Body.String())
+	}
+	var patRes struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&patRes)
+
+	// Attempt PUT /sprints/{sprintId} with read-only PAT -> 403
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/sprints/%s", sp.ID), bytes.NewReader(upSpBody))
+	req.Header.Set("Authorization", "Bearer "+patRes.Token)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for PUT sprint with read-only PAT, got %d", rec.Code)
+	}
+
+	// Attempt PUT /wiki/{wikiId} with read-only PAT -> 403
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/wiki/%s", wiki.ID), bytes.NewReader(upWikiBody))
+	req.Header.Set("Authorization", "Bearer "+patRes.Token)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for PUT wiki with read-only PAT, got %d", rec.Code)
+	}
+
+	// Attempt DELETE /inbound-webhooks/{webhookId} with read-only PAT -> 403
+	req = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/inbound-webhooks/%s", inHook.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+patRes.Token)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for DELETE inbound webhook with read-only PAT, got %d", rec.Code)
 	}
 
 	_ = ctx

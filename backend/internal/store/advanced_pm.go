@@ -3,8 +3,11 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -680,6 +683,13 @@ func (s *Store) CreateWikiPage(ctx context.Context, projectID, actorUserID strin
 		return nil, ErrForbidden
 	}
 
+	if in.ParentID != nil && *in.ParentID != "" {
+		var cnt int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wiki_pages WHERE id = $1 AND project_id = $2`, *in.ParentID, projectID).Scan(&cnt); err != nil || cnt == 0 {
+			return nil, fmt.Errorf("%w: parent wiki page does not belong to project", ErrBadRequest)
+		}
+	}
+
 	pageID := id.NewV7String()
 	now := time.Now().UTC()
 
@@ -779,6 +789,12 @@ func (s *Store) UpdateWikiPage(ctx context.Context, wikiID, actorUserID string, 
 		if *in.ParentID == wikiID {
 			return nil, fmt.Errorf("%w: page cannot be its own parent", ErrBadRequest)
 		}
+		if *in.ParentID != "" {
+			var cnt int
+			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wiki_pages WHERE id = $1 AND project_id = $2`, *in.ParentID, page.ProjectID).Scan(&cnt); err != nil || cnt == 0 {
+				return nil, fmt.Errorf("%w: parent wiki page does not belong to project", ErrBadRequest)
+			}
+		}
 		parentID = in.ParentID
 	}
 	sortOrder := page.SortOrder
@@ -848,6 +864,7 @@ func (s *Store) ListInboundWebhooks(ctx context.Context, projectID string) ([]do
 		if issueID.Valid {
 			w.DefaultIssueID = &issueID.String
 		}
+		w.Secret = ""
 		list = append(list, w)
 	}
 	return list, rows.Err()
@@ -868,6 +885,13 @@ func (s *Store) CreateInboundWebhook(ctx context.Context, projectID, actorUserID
 	}
 	if domain.RolePriority(proj.CurrentUserRole) < domain.RolePriority(domain.RoleAdmin) {
 		return nil, ErrForbidden
+	}
+
+	if defaultIssueID != nil && *defaultIssueID != "" {
+		var cnt int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE id = $1 AND project_id = $2`, *defaultIssueID, projectID).Scan(&cnt); err != nil || cnt == 0 {
+			return nil, fmt.Errorf("%w: default issue does not belong to project", ErrBadRequest)
+		}
 	}
 
 	rawToken, _, err := crypto.GenerateRandomToken(24)
@@ -926,7 +950,7 @@ func (s *Store) DeleteInboundWebhook(ctx context.Context, webhookID, actorUserID
 	return err
 }
 
-func (s *Store) ProcessInboundWebhook(ctx context.Context, token string, payload domain.InboundWebhookPayload) (*domain.Task, error) {
+func (s *Store) ProcessInboundWebhook(ctx context.Context, token string, bodyBytes []byte, sigHeader string, payload domain.InboundWebhookPayload) (*domain.Task, error) {
 	tokenHash := crypto.HashToken(token)
 
 	var wh domain.InboundWebhook
@@ -943,6 +967,19 @@ func (s *Store) ProcessInboundWebhook(ctx context.Context, token string, payload
 	}
 	if defIssueID.Valid {
 		wh.DefaultIssueID = &defIssueID.String
+	}
+
+	// Verify HMAC-SHA256 signature if signature header is provided
+	if sig := strings.TrimSpace(sigHeader); sig != "" {
+		if strings.HasPrefix(sig, "sha256=") {
+			sig = strings.TrimPrefix(sig, "sha256=")
+		}
+		mac := hmac.New(sha256.New, []byte(wh.Secret))
+		mac.Write(bodyBytes)
+		expectedMAC := hex.EncodeToString(mac.Sum(nil))
+		if !hmac.Equal([]byte(strings.ToLower(sig)), []byte(strings.ToLower(expectedMAC))) {
+			return nil, fmt.Errorf("%w: invalid webhook signature", ErrUnauthorized)
+		}
 	}
 
 	// Determine parent issue ID
@@ -1070,6 +1107,24 @@ type CSVImportResult struct {
 	Errors        []string `json:"errors"`
 }
 
+func sanitizeCSVField(s string) string {
+	if len(s) > 0 {
+		switch s[0] {
+		case '=', '+', '-', '@', '\t', '\r':
+			return "'" + s
+		}
+	}
+	return s
+}
+
+func sanitizeCSVRecord(record []string) []string {
+	out := make([]string, len(record))
+	for i, c := range record {
+		out[i] = sanitizeCSVField(c)
+	}
+	return out
+}
+
 func (s *Store) ExportProjectCSV(ctx context.Context, projectID, actorUserID string) ([]byte, error) {
 	proj, err := s.GetProject(ctx, projectID, actorUserID)
 	if err != nil {
@@ -1111,12 +1166,12 @@ func (s *Store) ExportProjectCSV(ctx context.Context, projectID, actorUserID str
 
 	for _, iss := range issues {
 		if len(iss.Tasks) == 0 {
-			_ = w.Write([]string{
+			_ = w.Write(sanitizeCSVRecord([]string{
 				iss.ID, iss.Title, "", "", "",
 				"", "", "", "", "",
 				"", "", "", "",
 				"", "",
-			})
+			}))
 			continue
 		}
 		for _, t := range iss.Tasks {
@@ -1159,12 +1214,12 @@ func (s *Store) ExportProjectCSV(ctx context.Context, projectID, actorUserID str
 				sprintID = *t.SprintID
 			}
 
-			_ = w.Write([]string{
+			_ = w.Write(sanitizeCSVRecord([]string{
 				iss.ID, iss.Title, t.ID, t.Title, stName,
 				strconv.Itoa(t.Progress), pStart, pEnd, aStart, aEnd,
 				pHours, aHours, pCost, aCost,
 				sp, sprintID,
-			})
+			}))
 		}
 	}
 

@@ -243,10 +243,10 @@ func (s *Server) registerRoutes() {
 	// Sprints
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/sprints", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListSprints)))
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/sprints", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleCreateSprint)))
-	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}", s.requireAuth(s.handleGetSprint))
-	s.mux.HandleFunc("PUT /api/v1/sprints/{sprintId}", s.requireAuth(s.handleUpdateSprint))
-	s.mux.HandleFunc("DELETE /api/v1/sprints/{sprintId}", s.requireAuth(s.handleDeleteSprint))
-	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}/burndown", s.requireAuth(s.handleGetSprintBurndown))
+	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("read:projects", s.handleGetSprint)))
+	s.mux.HandleFunc("PUT /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("write:projects", s.handleUpdateSprint)))
+	s.mux.HandleFunc("DELETE /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("write:projects", s.handleDeleteSprint)))
+	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}/burndown", s.requireAuth(s.requireScope("read:projects", s.handleGetSprintBurndown)))
 
 	// Activity Logs
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/activity", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListActivityLogs)))
@@ -254,14 +254,14 @@ func (s *Server) registerRoutes() {
 	// Project Wiki
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/wiki", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListWikiPages)))
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/wiki", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleCreateWikiPage)))
-	s.mux.HandleFunc("GET /api/v1/wiki/{wikiId}", s.requireAuth(s.handleGetWikiPage))
-	s.mux.HandleFunc("PUT /api/v1/wiki/{wikiId}", s.requireAuth(s.handleUpdateWikiPage))
-	s.mux.HandleFunc("DELETE /api/v1/wiki/{wikiId}", s.requireAuth(s.handleDeleteWikiPage))
+	s.mux.HandleFunc("GET /api/v1/wiki/{wikiId}", s.requireAuth(s.requireScope("read:projects", s.handleGetWikiPage)))
+	s.mux.HandleFunc("PUT /api/v1/wiki/{wikiId}", s.requireAuth(s.requireScope("write:projects", s.handleUpdateWikiPage)))
+	s.mux.HandleFunc("DELETE /api/v1/wiki/{wikiId}", s.requireAuth(s.requireScope("write:projects", s.handleDeleteWikiPage)))
 
 	// Inbound Webhooks
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/inbound-webhooks", s.requireProjectRole(domain.RoleAdmin, s.requireScope("manage:webhooks", s.handleListInboundWebhooks)))
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/inbound-webhooks", s.requireProjectRole(domain.RoleAdmin, s.requireScope("manage:webhooks", s.handleCreateInboundWebhook)))
-	s.mux.HandleFunc("DELETE /api/v1/inbound-webhooks/{webhookId}", s.requireAuth(s.handleDeleteInboundWebhook))
+	s.mux.HandleFunc("DELETE /api/v1/inbound-webhooks/{webhookId}", s.requireAuth(s.requireScope("manage:webhooks", s.handleDeleteInboundWebhook)))
 	s.mux.HandleFunc("POST /api/v1/inbound-webhooks/{token}", s.handleProcessInboundWebhook)
 
 	// CSV Export & Import

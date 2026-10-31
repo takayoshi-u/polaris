@@ -1209,6 +1209,70 @@ func (s *Server) handleDeleteProjectTemplate(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Issues & Tasks Request Structs
+
+type CreateIssueRequest struct {
+	TemplateID        *string                    `json:"template_id"`
+	TypeID            *string                    `json:"type_id"`
+	Title             string                     `json:"title"`
+	Description       string                     `json:"description"`
+	LabelIDs          []string                   `json:"label_ids"`
+	CustomValues      map[string]json.RawMessage `json:"custom_values"`
+	CreateInitialTask bool                       `json:"create_initial_task"`
+}
+
+type UpdateIssueRequest struct {
+	TemplateID   *string                    `json:"template_id"`
+	TypeID       *string                    `json:"type_id"`
+	State        *string                    `json:"state"`
+	Title        *string                    `json:"title"`
+	Description  *string                    `json:"description"`
+	LabelIDs     *[]string                  `json:"label_ids"`
+	CustomValues map[string]json.RawMessage `json:"custom_values"`
+	DisplayOrder *int                       `json:"display_order"`
+}
+
+type CreateTaskRequest struct {
+	IssueID          string                     `json:"issue_id"`
+	TemplateID       *string                    `json:"template_id"`
+	TypeID           *string                    `json:"type_id"`
+	StatusID         *string                    `json:"status_id"`
+	Title            string                     `json:"title"`
+	Description      string                     `json:"description"`
+	Progress         int                        `json:"progress"`
+	PlannedStartDate *string                    `json:"planned_start_date"`
+	PlannedEndDate   *string                    `json:"planned_end_date"`
+	ActualStartDate  *string                    `json:"actual_start_date"`
+	ActualEndDate    *string                    `json:"actual_end_date"`
+	PlannedHours     *float64                   `json:"planned_hours"`
+	ActualHours      *float64                   `json:"actual_hours"`
+	PlannedCost      *float64                   `json:"planned_cost"`
+	ActualCost       *float64                   `json:"actual_cost"`
+	StoryPoints      *float64                   `json:"story_points"`
+	Assignees        []domain.SubjectRef        `json:"assignees"`
+	LabelIDs         []string                   `json:"label_ids"`
+	CustomValues     map[string]json.RawMessage `json:"custom_values"`
+}
+
+type UpdateTaskRequest struct {
+	IssueID          *string                    `json:"issue_id"`
+	TemplateID       *string                    `json:"template_id"`
+	TypeID           *string                    `json:"type_id"`
+	StatusID         *string                    `json:"status_id"`
+	Title            *string                    `json:"title"`
+	Description      *string                    `json:"description"`
+	Progress         *int                       `json:"progress"`
+	PlannedStartDate *string                    `json:"planned_start_date"`
+	PlannedEndDate   *string                    `json:"planned_end_date"`
+	ActualStartDate  *string                    `json:"actual_start_date"`
+	ActualEndDate    *string                    `json:"actual_end_date"`
+	Assignees        *[]domain.SubjectRef       `json:"assignees"`
+	LabelIDs         *[]string                  `json:"label_ids"`
+	CustomValues     map[string]json.RawMessage `json:"custom_values"`
+	KanbanOrder      *int                       `json:"kanban_order"`
+	GanttOrder       *int                       `json:"gantt_order"`
+}
+
 // Issues & Tasks
 func (s *Server) handleListIssues(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -1228,6 +1292,7 @@ func (s *Server) handleListIssues(w http.ResponseWriter, r *http.Request) {
 		LabelIDs:   labelIDs,
 		AssigneeID: q.Get("assignee_id"),
 		StatusID:   q.Get("status_id"),
+		TypeID:     q.Get("type_id"),
 		IssueState: issueState,
 		Keyword:    q.Get("keyword"),
 	}
@@ -1240,20 +1305,14 @@ func (s *Server) handleListIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		TemplateID        *string                    `json:"template_id"`
-		Title             string                     `json:"title"`
-		Description       string                     `json:"description"`
-		LabelIDs          []string                   `json:"label_ids"`
-		CustomValues      map[string]json.RawMessage `json:"custom_values"`
-		CreateInitialTask bool                       `json:"create_initial_task"`
-	}
+	var body CreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
 	iss, err := s.store.CreateIssue(r.Context(), r.PathValue("projectId"), currentUser(r).ID, store.IssueCreateInput{
 		TemplateID:        body.TemplateID,
+		TypeID:            body.TypeID,
 		Title:             body.Title,
 		Description:       body.Description,
 		LabelIDs:          body.LabelIDs,
@@ -1279,28 +1338,39 @@ func (s *Server) handleGetIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		TemplateID   *string                    `json:"template_id"`
-		State        *string                    `json:"state"`
-		Title        *string                    `json:"title"`
-		Description  *string                    `json:"description"`
-		LabelIDs     *[]string                  `json:"label_ids"`
-		CustomValues map[string]json.RawMessage `json:"custom_values"`
-		DisplayOrder *int                       `json:"display_order"`
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read body"})
+		return
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &rawMap); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
-	iss, err := s.store.UpdateIssue(r.Context(), r.PathValue("projectId"), r.PathValue("issueId"), currentUser(r).ID, store.IssueUpdateInput{
+	var body UpdateIssueRequest
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	in := store.IssueUpdateInput{
 		TemplateID:   body.TemplateID,
+		TypeID:       body.TypeID,
 		State:        body.State,
 		Title:        body.Title,
 		Description:  body.Description,
 		LabelIDs:     body.LabelIDs,
 		CustomValues: body.CustomValues,
 		DisplayOrder: body.DisplayOrder,
-	})
+	}
+	if raw, ok := rawMap["type_id"]; ok {
+		s := strings.TrimSpace(string(raw))
+		if s == "null" || s == `""` {
+			in.ClearTypeID = true
+			in.TypeID = nil
+		}
+	}
+	iss, err := s.store.UpdateIssue(r.Context(), r.PathValue("projectId"), r.PathValue("issueId"), currentUser(r).ID, in)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -1336,25 +1406,7 @@ func (s *Server) handleDeleteIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		IssueID          string                     `json:"issue_id"`
-		TemplateID       *string                    `json:"template_id"`
-		StatusID         *string                    `json:"status_id"`
-		Title            string                     `json:"title"`
-		Description      string                     `json:"description"`
-		Progress         int                        `json:"progress"`
-		PlannedStartDate *string                    `json:"planned_start_date"`
-		PlannedEndDate   *string                    `json:"planned_end_date"`
-		ActualStartDate  *string                    `json:"actual_start_date"`
-		ActualEndDate    *string                    `json:"actual_end_date"`
-		PlannedHours     *float64                   `json:"planned_hours"`
-		ActualHours      *float64                   `json:"actual_hours"`
-		PlannedCost      *float64                   `json:"planned_cost"`
-		ActualCost       *float64                   `json:"actual_cost"`
-		Assignees        []domain.SubjectRef        `json:"assignees"`
-		LabelIDs         []string                   `json:"label_ids"`
-		CustomValues     map[string]json.RawMessage `json:"custom_values"`
-	}
+	var body CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
@@ -1362,6 +1414,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	t, err := s.store.CreateTask(r.Context(), r.PathValue("projectId"), currentUser(r).ID, store.TaskCreateInput{
 		IssueID:          body.IssueID,
 		TemplateID:       body.TemplateID,
+		TypeID:           body.TypeID,
 		StatusID:         body.StatusID,
 		Title:            body.Title,
 		Description:      body.Description,
@@ -1374,6 +1427,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		ActualHours:      body.ActualHours,
 		PlannedCost:      body.PlannedCost,
 		ActualCost:       body.ActualCost,
+		StoryPoints:      body.StoryPoints,
 		Assignees:        body.Assignees,
 		LabelIDs:         body.LabelIDs,
 		CustomValues:     body.CustomValues,
@@ -1430,23 +1484,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		IssueID          *string                    `json:"issue_id"`
-		TemplateID       *string                    `json:"template_id"`
-		StatusID         *string                    `json:"status_id"`
-		Title            *string                    `json:"title"`
-		Description      *string                    `json:"description"`
-		Progress         *int                       `json:"progress"`
-		PlannedStartDate *string                    `json:"planned_start_date"`
-		PlannedEndDate   *string                    `json:"planned_end_date"`
-		ActualStartDate  *string                    `json:"actual_start_date"`
-		ActualEndDate    *string                    `json:"actual_end_date"`
-		Assignees        *[]domain.SubjectRef       `json:"assignees"`
-		LabelIDs         *[]string                  `json:"label_ids"`
-		CustomValues     map[string]json.RawMessage `json:"custom_values"`
-		KanbanOrder      *int                       `json:"kanban_order"`
-		GanttOrder       *int                       `json:"gantt_order"`
-	}
+	var body UpdateTaskRequest
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
@@ -1455,6 +1493,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	in := store.TaskUpdateInput{
 		IssueID:          body.IssueID,
 		TemplateID:       body.TemplateID,
+		TypeID:           body.TypeID,
 		StatusID:         body.StatusID,
 		Title:            body.Title,
 		Description:      body.Description,
@@ -1468,6 +1507,14 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		CustomValues:     body.CustomValues,
 		KanbanOrder:      body.KanbanOrder,
 		GanttOrder:       body.GanttOrder,
+	}
+
+	if raw, ok := rawMap["type_id"]; ok {
+		s := strings.TrimSpace(string(raw))
+		if s == "null" || s == `""` {
+			in.ClearTypeID = true
+			in.TypeID = nil
+		}
 	}
 
 	if raw, ok := rawMap["planned_hours"]; ok {

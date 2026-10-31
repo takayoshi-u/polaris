@@ -86,6 +86,7 @@ const (
 	StdFieldPlannedCost  = "planned_cost"
 	StdFieldActualCost   = "actual_cost"
 	StdFieldProgress     = "progress"
+	StdFieldType         = "type"
 )
 
 // Placeholder for unviewable fields (Method A)
@@ -198,6 +199,15 @@ type Label struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type ItemType struct {
+	ID           string    `json:"id"`
+	ProjectID    *string   `json:"project_id"`
+	Name         string    `json:"name"`
+	Color        string    `json:"color"`
+	DisplayOrder int       `json:"display_order"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type SubjectRef struct {
 	Type string `json:"type"` // "user" or "group"
 	ID   string `json:"id"`
@@ -270,6 +280,8 @@ type Issue struct {
 	ID               string                          `json:"id"`
 	ProjectID        string                          `json:"project_id"`
 	TemplateID       *string                         `json:"template_id"`
+	TypeID           *string                         `json:"type_id"`
+	Type             *ItemType                       `json:"type,omitempty"`
 	OwnerUserID      string                          `json:"owner_user_id"`
 	State            string                          `json:"state"`
 	Title            string                          `json:"title"`
@@ -290,6 +302,8 @@ type Task struct {
 	IssueID          string                          `json:"issue_id"`
 	SprintID         *string                         `json:"sprint_id"`
 	TemplateID       *string                         `json:"template_id"`
+	TypeID           *string                         `json:"type_id"`
+	Type             *ItemType                       `json:"type,omitempty"`
 	OwnerUserID      string                          `json:"owner_user_id"`
 	StatusID         string                          `json:"status_id"`
 	Title            string                          `json:"title"`

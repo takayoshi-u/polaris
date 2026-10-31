@@ -108,6 +108,12 @@
               タイトル {{ sortKey === 'title' ? (sortOrder === 'asc' ? '▲' : '▼') : '' }}
             </th>
             <th
+              style="width: 120px; padding: 8px 10px; cursor: pointer; user-select: none;"
+              @click="sortBy('type')"
+            >
+              種別 {{ sortKey === 'type' ? (sortOrder === 'asc' ? '▲' : '▼') : '' }}
+            </th>
+            <th
               style="width: 140px; padding: 8px 10px; cursor: pointer; user-select: none;"
               @click="sortBy('status')"
             >
@@ -190,6 +196,23 @@
                   </span>
                 </div>
               </td>
+              <!-- Type (Issue) -->
+              <td style="padding: 6px 10px;">
+                <span
+                  v-if="getType(iss.type_id)"
+                  class="badge"
+                  :style="{
+                    backgroundColor: getType(iss.type_id)?.color,
+                    color: '#fff',
+                    fontSize: '10px',
+                    fontWeight: '700',
+                    padding: '2px 7px'
+                  }"
+                >
+                  {{ getType(iss.type_id)?.name }}
+                </span>
+                <span v-else style="color: var(--text-muted); font-size: 11px;">-</span>
+              </td>
               <td style="padding: 6px 10px; color: var(--text-muted); font-size: 11px;">
                 -
               </td>
@@ -258,6 +281,87 @@
                     <span v-if="t.story_points" class="badge badge-purple" style="font-size: 10px; padding: 1px 4px;">
                       {{ t.story_points }} SP
                     </span>
+                  </div>
+                </td>
+
+                <!-- Type with Quick Change (Task) -->
+                <td class="type-picker-container" style="padding: 4px 10px; position: relative;">
+                  <div style="display: inline-block;">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      style="padding: 2px 6px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"
+                      :title="canEdit ? 'クリックして種別を変更' : ''"
+                      @click="canEdit && toggleTypeDropdown(t.id)"
+                    >
+                      <span
+                        v-if="getType(t.type_id)"
+                        class="badge"
+                        :style="{
+                          backgroundColor: getType(t.type_id)?.color,
+                          color: '#fff',
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          padding: '1px 6px'
+                        }"
+                      >
+                        {{ getType(t.type_id)?.name }}
+                      </span>
+                      <span v-else style="color: var(--text-muted); font-size: 11px;">未設定</span>
+                      <span v-if="canEdit" style="font-size: 9px; color: var(--text-muted);">▼</span>
+                    </button>
+
+                    <!-- Quick Type Dropdown -->
+                    <div
+                      v-if="openTypeTaskId === t.id"
+                      style="
+                        position: absolute;
+                        top: 100%;
+                        left: 10px;
+                        z-index: 50;
+                        background: var(--bg-card);
+                        border: 1px solid var(--border-color);
+                        border-radius: 6px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        padding: 4px;
+                        min-width: 140px;
+                      "
+                    >
+                      <div
+                        style="
+                          padding: 5px 8px;
+                          cursor: pointer;
+                          border-radius: 4px;
+                          display: flex;
+                          align-items: center;
+                          gap: 6px;
+                          font-size: 11px;
+                          color: var(--text-muted);
+                        "
+                        :style="{ background: !t.type_id ? 'var(--bg-elevated)' : 'transparent' }"
+                        @click="inlineUpdateTaskType(t, null)"
+                      >
+                        <span>(未設定)</span>
+                      </div>
+                      <div
+                        v-for="tp in types || []"
+                        :key="tp.id"
+                        style="
+                          padding: 5px 8px;
+                          cursor: pointer;
+                          border-radius: 4px;
+                          display: flex;
+                          align-items: center;
+                          gap: 6px;
+                          font-size: 11px;
+                        "
+                        :style="{ background: t.type_id === tp.id ? 'var(--bg-elevated)' : 'transparent' }"
+                        @click="inlineUpdateTaskType(t, tp.id)"
+                      >
+                        <span :style="{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: tp.color }"></span>
+                        <span>{{ tp.name }}</span>
+                      </div>
+                    </div>
                   </div>
                 </td>
 
@@ -451,7 +555,7 @@
           </template>
 
           <tr v-if="filteredIssues.length === 0">
-            <td colspan="10" style="text-align: center; padding: 30px; color: var(--text-muted);">
+            <td colspan="11" style="text-align: center; padding: 30px; color: var(--text-muted);">
               該当する課題またはタスクがありません
             </td>
           </tr>
@@ -462,7 +566,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Issue, Status, Task, User, SubjectRef } from '~/types/polaris'
+import type { Issue, ItemType, Status, Task, User, SubjectRef } from '~/types/polaris'
 import { formatHours, hasAtMostTwoDecimals } from '~/utils/format'
 
 const props = defineProps<{
@@ -471,6 +575,7 @@ const props = defineProps<{
   statuses: Status[]
   users: User[]
   canEdit: boolean
+  types?: ItemType[]
 }>()
 
 const emit = defineEmits<{
@@ -489,9 +594,15 @@ const isBulkUpdating = ref(false)
 
 const openStatusTaskId = ref<string | null>(null)
 const openAssigneeTaskId = ref<string | null>(null)
+const openTypeTaskId = ref<string | null>(null)
+
+function getType(typeId?: string | null): ItemType | undefined {
+  if (!typeId) return undefined
+  return (props.types || []).find(t => t.id === typeId)
+}
 
 // Sorting
-const sortKey = ref<'title' | 'status' | 'assignee' | 'story_points' | 'progress' | 'planned_hours' | 'actual_hours' | 'dates'>('title')
+const sortKey = ref<'title' | 'type' | 'status' | 'assignee' | 'story_points' | 'progress' | 'planned_hours' | 'actual_hours' | 'dates'>('title')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 
 function sortBy(key: typeof sortKey.value) {
@@ -552,6 +663,10 @@ function getSortedTasksForIssue(iss: Issue): Task[] {
     let cmp = 0
     if (sortKey.value === 'title') {
       cmp = a.title.localeCompare(b.title)
+    } else if (sortKey.value === 'type') {
+      const aType = getType(a.type_id)?.name || ''
+      const bType = getType(b.type_id)?.name || ''
+      cmp = aType.localeCompare(bType)
     } else if (sortKey.value === 'status') {
       const aOrder = props.statuses.find(s => s.id === a.status_id)?.display_order ?? 999
       const bOrder = props.statuses.find(s => s.id === b.status_id)?.display_order ?? 999
@@ -715,6 +830,25 @@ function toggleStatusDropdown(taskId: string) {
 
 function toggleAssigneeDropdown(taskId: string) {
   openAssigneeTaskId.value = openAssigneeTaskId.value === taskId ? null : taskId
+}
+
+function toggleTypeDropdown(taskId: string) {
+  openTypeTaskId.value = openTypeTaskId.value === taskId ? null : taskId
+}
+
+async function inlineUpdateTaskType(task: Task, newTypeId: string | null) {
+  openTypeTaskId.value = null
+  if ((task.type_id || null) === (newTypeId || null)) return
+  try {
+    await apiFetch(`/projects/${props.projectId}/tasks/${task.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ type_id: newTypeId || null })
+    })
+    notifyToast('種別を変更しました', 'success')
+    emit('refresh')
+  } catch (e: any) {
+    notifyToast(e.message || '種別更新に失敗しました', 'error')
+  }
 }
 
 async function inlineUpdateTaskStatus(task: Task, newStatusId: string) {

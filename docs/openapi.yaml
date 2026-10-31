@@ -256,6 +256,26 @@ components:
           type: string
           format: date-time
 
+    ItemType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        color:
+          type: string
+        display_order:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
     CustomFieldDefinition:
       type: object
       properties:
@@ -427,6 +447,12 @@ components:
           type: string
           format: uuid
           nullable: true
+        type_id:
+          type: string
+          format: uuid
+          nullable: true
+        type:
+          $ref: '#/components/schemas/ItemType'
         owner_user_id:
           type: string
           format: uuid
@@ -533,6 +559,12 @@ components:
           type: string
           format: uuid
           nullable: true
+        type_id:
+          type: string
+          format: uuid
+          nullable: true
+        type:
+          $ref: '#/components/schemas/ItemType'
         owner_user_id:
           type: string
           format: uuid
@@ -1618,6 +1650,54 @@ paths:
         '201':
           description: 作成完了
 
+  /system/types:
+    get:
+      summary: システム共通種別一覧取得（manage_system権限必須）
+      responses:
+        '200':
+          description: 種別一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ItemType'
+    post:
+      summary: システム共通種別作成（manage_system権限必須）
+      responses:
+        '201':
+          description: 作成完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemType'
+
+  /system/types/{typeId}:
+    put:
+      summary: システム共通種別更新（manage_system権限必須）
+      parameters:
+        - in: path
+          name: typeId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 更新完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemType'
+    delete:
+      summary: システム共通種別削除（manage_system権限必須）
+      parameters:
+        - in: path
+          name: typeId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 削除完了
+
   /groups:
     get:
       summary: システム全体グループ一覧取得
@@ -1758,6 +1838,72 @@ paths:
         '204':
           description: 削除完了
 
+  /projects/{projectId}/types:
+    get:
+      summary: プロジェクト種別一覧取得（プロジェクト固有＋システム共通）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 種別一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ItemType'
+    post:
+      summary: プロジェクト固有種別作成
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 作成完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemType'
+
+  /projects/{projectId}/types/{typeId}:
+    put:
+      summary: プロジェクト固有種別更新
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: typeId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 更新完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemType'
+    delete:
+      summary: プロジェクト固有種別削除
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: typeId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 削除完了
+
   /projects/{projectId}/templates:
     get:
       summary: プロジェクトのテンプレート一覧取得
@@ -1797,6 +1943,9 @@ paths:
           schema: { type: string, format: uuid }
         - in: query
           name: status_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: type_id
           schema: { type: string, format: uuid }
         - in: query
           name: state

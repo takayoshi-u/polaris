@@ -68,6 +68,14 @@
       >
         🔗 全体Webhook連携
       </button>
+      <button
+        type="button"
+        class="btn btn-sm"
+        :class="activeTab === 'types' ? 'btn-primary' : 'btn-secondary'"
+        @click="switchTab('types')"
+      >
+        🏷️ 共通種別管理 ({{ sysTypes.length }})
+      </button>
     </div>
 
     <!-- ========================================== -->
@@ -1329,6 +1337,179 @@
       </div>
     </div>
 
+    <!-- ========================================== -->
+    <!-- TAB 8: SYSTEM COMMON TYPES                 -->
+    <!-- ========================================== -->
+    <div v-if="activeTab === 'types'" style="display: flex; flex-direction: column; gap: 16px;">
+      <!-- Add Type Card -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 14px; max-width: 800px;">
+        <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <h2 style="font-size: 15px; font-weight: 700;">システム共通種別（全プロジェクト共有）</h2>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              タスクや課題の分類に使用できるシステム共通の種別（例: タスク、バグ、機能追加、問い合わせ等）を定義します。
+            </p>
+          </div>
+          <span class="badge badge-blue">{{ sysTypes.length }}件登録済み</span>
+        </div>
+
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createSystemType">
+          <div style="display: grid; grid-template-columns: 80px 1fr 140px; gap: 10px; align-items: end;">
+            <div>
+              <label class="field-label">表示順 *</label>
+              <input v-model.number="sysTypeForm.display_order" type="number" min="1" required style="width: 100%;" />
+            </div>
+            <div>
+              <label class="field-label">種別名 *</label>
+              <input v-model="sysTypeForm.name" type="text" required placeholder="例: バグ, 改善, 調査" style="width: 100%;" />
+            </div>
+            <div>
+              <label class="field-label">カラー</label>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input v-model="sysTypeForm.color" type="color" style="width: 44px; height: 34px; padding: 2px; cursor: pointer;" />
+                <span class="badge" :style="{ backgroundColor: sysTypeForm.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }">
+                  プレビュー
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Preset Color Palette -->
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label class="field-label">カラーパレット（プリセット）</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <button
+                v-for="c in PRESET_COLORS"
+                :key="c"
+                type="button"
+                style="width: 24px; height: 24px; border-radius: 6px; cursor: pointer; border: 2px solid transparent; transition: transform 0.1s;"
+                :style="{
+                  backgroundColor: c,
+                  borderColor: sysTypeForm.color.toLowerCase() === c.toLowerCase() ? 'var(--text-main)' : 'transparent',
+                  transform: sysTypeForm.color.toLowerCase() === c.toLowerCase() ? 'scale(1.15)' : 'none'
+                }"
+                :title="c"
+                @click="sysTypeForm.color = c"
+              />
+            </div>
+          </div>
+
+          <div>
+            <button type="submit" class="btn btn-primary btn-sm">＋ 共通種別を追加</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Types List Table -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <h3 style="font-size: 14px; font-weight: 700;">登録済み共通種別一覧</h3>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="background-color: var(--bg-input); border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-align: left;">
+                <th style="padding: 10px 14px; width: 80px;">順序</th>
+                <th style="padding: 10px 14px;">種別名</th>
+                <th style="padding: 10px 14px; width: 140px;">バッジ表示</th>
+                <th style="padding: 10px 14px; width: 120px;">カラーコード</th>
+                <th style="padding: 10px 14px; width: 180px;">作成日時</th>
+                <th style="padding: 10px 14px; width: 140px; text-align: right;">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="t in sortedSysTypes"
+                :key="t.id"
+                style="border-bottom: 1px solid var(--border-color);"
+              >
+                <td style="padding: 10px 14px; font-weight: 600;">{{ t.display_order }}</td>
+                <td style="padding: 10px 14px; font-weight: 600; color: var(--text-main);">{{ t.name }}</td>
+                <td style="padding: 10px 14px;">
+                  <span
+                    class="badge"
+                    :style="{ backgroundColor: t.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }"
+                  >
+                    {{ t.name }}
+                  </span>
+                </td>
+                <td style="padding: 10px 14px; font-family: monospace; font-size: 12px; color: var(--text-muted);">
+                  <span :style="{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: t.color, marginRight: '6px' }"></span>
+                  {{ t.color }}
+                </td>
+                <td style="padding: 10px 14px; font-size: 12px; color: var(--text-muted);">
+                  {{ t.created_at ? t.created_at.slice(0, 19).replace('T', ' ') : '-' }}
+                </td>
+                <td style="padding: 10px 14px; text-align: right;">
+                  <div style="display: inline-flex; gap: 6px;">
+                    <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" @click="openEditTypeModal(t)">編集</button>
+                    <button type="button" class="btn btn-danger btn-sm" style="padding: 2px 8px; font-size: 11px;" @click="deleteSystemType(t)">削除</button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="sysTypes.length === 0">
+                <td colspan="6" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                  登録されている共通種別はありません
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit System Type Modal -->
+    <div v-if="editingSysType" class="modal-backdrop" @click.self="editingSysType = null">
+      <div class="modal-panel" style="max-width: 480px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <h3 style="font-size: 16px; font-weight: 700;">共通種別の編集</h3>
+          <button class="btn btn-secondary btn-sm" @click="editingSysType = null">✕</button>
+        </div>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="updateSystemType">
+          <div>
+            <label class="field-label">表示順 *</label>
+            <input v-model.number="editTypeForm.display_order" type="number" min="1" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">種別名 *</label>
+            <input v-model="editTypeForm.name" type="text" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">カラー</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input v-model="editTypeForm.color" type="color" style="width: 44px; height: 34px; padding: 2px; cursor: pointer;" />
+              <span class="badge" :style="{ backgroundColor: editTypeForm.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }">
+                プレビュー: {{ editTypeForm.name || '種別' }}
+              </span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label class="field-label">カラーパレット（プリセット）</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <button
+                v-for="c in PRESET_COLORS"
+                :key="c"
+                type="button"
+                style="width: 24px; height: 24px; border-radius: 6px; cursor: pointer; border: 2px solid transparent; transition: transform 0.1s;"
+                :style="{
+                  backgroundColor: c,
+                  borderColor: editTypeForm.color.toLowerCase() === c.toLowerCase() ? 'var(--text-main)' : 'transparent',
+                  transform: editTypeForm.color.toLowerCase() === c.toLowerCase() ? 'scale(1.15)' : 'none'
+                }"
+                :title="c"
+                @click="editTypeForm.color = c"
+              />
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+            <button type="button" class="btn btn-secondary" @click="editingSysType = null">キャンセル</button>
+            <button type="submit" class="btn btn-primary">変更を保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Bulk User Invite Modal -->
     <BulkInviteModal
       v-if="showBulkInviteModal"
@@ -1345,6 +1526,7 @@
 import type {
   CustomFieldDefinition,
   Group,
+  ItemType,
   Label,
   SMTPSettings,
   Status,
@@ -1359,7 +1541,20 @@ import type {
 } from '~/types/polaris'
 import { hasAtMostTwoDecimals } from '~/utils/format'
 
-type AdminTab = 'users' | 'general' | 'smtp' | 'groups_perms' | 'defaults' | 'templates' | 'webhooks'
+type AdminTab = 'users' | 'general' | 'smtp' | 'groups_perms' | 'defaults' | 'templates' | 'webhooks' | 'types'
+
+const PRESET_COLORS = [
+  '#3b82f6', // blue
+  '#ef4444', // red
+  '#10b981', // green
+  '#f59e0b', // amber
+  '#8b5cf6', // purple
+  '#ec4899', // pink
+  '#6366f1', // indigo
+  '#64748b', // slate
+  '#06b6d4', // cyan
+  '#f97316'  // orange
+]
 
 const route = useRoute()
 const router = useRouter()
@@ -1368,7 +1563,7 @@ const { apiFetch, notifyToast, currentUser } = useApi()
 const activeTab = ref<AdminTab>((route.query.tab as AdminTab) || 'users')
 
 watch(() => route.query.tab, (t) => {
-  if (t && ['users', 'general', 'smtp', 'groups_perms', 'defaults', 'templates', 'webhooks'].includes(String(t))) {
+  if (t && ['users', 'general', 'smtp', 'groups_perms', 'defaults', 'templates', 'webhooks', 'types'].includes(String(t))) {
     activeTab.value = t as AdminTab
   }
 })
@@ -1385,6 +1580,21 @@ const sysLabels = ref<Label[]>([])
 const sysStatuses = ref<Status[]>([])
 const sysCustomFields = ref<CustomFieldDefinition[]>([])
 const sysTemplates = ref<Template[]>([])
+const sysTypes = ref<ItemType[]>([])
+const sortedSysTypes = computed(() => [...sysTypes.value].sort((a, b) => a.display_order - b.display_order))
+
+const sysTypeForm = reactive({
+  name: '',
+  color: '#3b82f6',
+  display_order: 1
+})
+
+const editingSysType = ref<ItemType | null>(null)
+const editTypeForm = reactive({
+  name: '',
+  color: '#3b82f6',
+  display_order: 1
+})
 
 const userSearchQuery = ref('')
 const userStatusFilter = ref<'all' | 'active' | 'invited' | 'disabled'>('all')
@@ -1669,7 +1879,7 @@ onMounted(async () => {
 
 async function loadAdminData() {
   try {
-    const [st, smtp, usrs, grps, perms, lbls, sts, cfs, tpls, whs] = await Promise.all([
+    const [st, smtp, usrs, grps, perms, lbls, sts, cfs, tpls, whs, types] = await Promise.all([
       apiFetch<SystemSettings>('/system/settings'),
       apiFetch<SMTPSettings>('/system/smtp'),
       apiFetch<User[]>('/users'),
@@ -1679,7 +1889,8 @@ async function loadAdminData() {
       apiFetch<Status[]>('/system/statuses'),
       apiFetch<CustomFieldDefinition[]>('/system/custom-fields'),
       apiFetch<Template[]>('/system/templates'),
-      apiFetch<Webhook[]>('/system/webhooks')
+      apiFetch<Webhook[]>('/system/webhooks'),
+      apiFetch<ItemType[]>('/system/types').catch(() => [])
     ])
 
     sysForm.default_hours_per_day = st.default_hours_per_day
@@ -1707,6 +1918,10 @@ async function loadAdminData() {
     sysCustomFields.value = cfs || []
     sysTemplates.value = tpls || []
     sysWebhooks.value = whs || []
+    sysTypes.value = types || []
+    if (!sysTypeForm.name) {
+      sysTypeForm.display_order = Math.max(...sysTypes.value.map(t => t.display_order), 0) + 1
+    }
   } catch (e: any) {
     notifyToast(e.message, 'error')
   }
@@ -2233,6 +2448,62 @@ async function deleteSysWebhook(webhookId: string) {
     await apiFetch(`/system/webhooks/${webhookId}`, { method: 'DELETE' })
     await loadSysWebhooks()
     notifyToast('全体 Webhook を削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function createSystemType() {
+  if (!sysTypeForm.name.trim()) return
+  try {
+    await apiFetch('/system/types', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: sysTypeForm.name.trim(),
+        color: sysTypeForm.color,
+        display_order: sysTypeForm.display_order
+      })
+    })
+    sysTypeForm.name = ''
+    await loadAdminData()
+    notifyToast('システム共通種別を追加しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+function openEditTypeModal(t: ItemType) {
+  editingSysType.value = t
+  editTypeForm.name = t.name
+  editTypeForm.color = t.color
+  editTypeForm.display_order = t.display_order
+}
+
+async function updateSystemType() {
+  if (!editingSysType.value || !editTypeForm.name.trim()) return
+  try {
+    await apiFetch(`/system/types/${editingSysType.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: editTypeForm.name.trim(),
+        color: editTypeForm.color,
+        display_order: editTypeForm.display_order
+      })
+    })
+    editingSysType.value = null
+    await loadAdminData()
+    notifyToast('共通種別を更新しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteSystemType(t: ItemType) {
+  if (!confirm(`共通種別「${t.name}」を削除してもよろしいですか？`)) return
+  try {
+    await apiFetch(`/system/types/${t.id}`, { method: 'DELETE' })
+    await loadAdminData()
+    notifyToast('共通種別を削除しました', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
   }

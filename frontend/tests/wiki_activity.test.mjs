@@ -70,3 +70,19 @@ test('resolveTaskEmbeds replaces task:UUID and #タスク名 patterns', () => {
   const resName = resolveTaskEmbeds(textWithName, tasks)
   assert.equal(resName, '進捗は [TASK:99999999-8888-7777-6666-555555555555:API実装] を確認してください')
 })
+
+function escapeHtml(str) {
+  if (!str) return ''
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+test('escapeHtml sanitizes special characters', () => {
+  const dangerous = '<script>alert("XSS & test\'s")</script>'
+  const sanitized = escapeHtml(dangerous)
+  assert.equal(sanitized, '&lt;script&gt;alert(&quot;XSS &amp; test&#39;s&quot;)&lt;/script&gt;')
+})

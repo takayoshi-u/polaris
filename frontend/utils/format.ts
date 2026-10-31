@@ -160,6 +160,19 @@ export interface TaskEmbedInfo {
 }
 
 /**
+ * Escapes HTML characters in a string to prevent XSS.
+ */
+export function escapeHtml(str?: string | null): string {
+  if (!str) return ''
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
  * Renders Markdown for Wiki with task embed tokens (task:UUID or #taskTitle) replaced with rich interactive pills.
  */
 export function renderWikiMarkdownWithTaskEmbeds(
@@ -177,9 +190,11 @@ export function renderWikiMarkdownWithTaskEmbeds(
     if (!t) return match
     const st = t.status_id ? statusMap.get(t.status_id) : undefined
     const stColor = st?.color || '#3b82f6'
-    const stName = st?.name || 'ステータス未設定'
+    const stName = escapeHtml(st?.name || 'ステータス未設定')
+    const escapedTitle = escapeHtml(t.title)
+    const escapedId = escapeHtml(t.id)
     const prog = t.progress ?? 0
-    return `<a href="javascript:void(0)" class="wiki-task-pill" data-task-id="${t.id}" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: var(--text-main); text-decoration: none; font-size: 12px; font-weight: 500;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${stColor};"></span><strong style="color: var(--primary);">📋 ${t.title}</strong><span style="font-size: 10px; color: var(--text-muted);">(${stName} ${prog}%)</span></a>`
+    return `<a href="javascript:void(0)" class="wiki-task-pill" data-task-id="${escapedId}" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: var(--text-main); text-decoration: none; font-size: 12px; font-weight: 500;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${stColor};"></span><strong style="color: var(--primary);">📋 ${escapedTitle}</strong><span style="font-size: 10px; color: var(--text-muted);">(${stName} ${prog}%)</span></a>`
   })
 
   // 2. Match #TaskTitle (when exact task title matches)
@@ -195,9 +210,11 @@ export function renderWikiMarkdownWithTaskEmbeds(
       if (!t) return match
       const st = t.status_id ? statusMap.get(t.status_id) : undefined
       const stColor = st?.color || '#3b82f6'
-      const stName = st?.name || 'ステータス未設定'
+      const stName = escapeHtml(st?.name || 'ステータス未設定')
+      const escapedTitle = escapeHtml(t.title)
+      const escapedId = escapeHtml(t.id)
       const prog = t.progress ?? 0
-      return `<a href="javascript:void(0)" class="wiki-task-pill" data-task-id="${t.id}" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: var(--text-main); text-decoration: none; font-size: 12px; font-weight: 500;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${stColor};"></span><strong style="color: var(--primary);">📋 ${t.title}</strong><span style="font-size: 10px; color: var(--text-muted);">(${stName} ${prog}%)</span></a>`
+      return `<a href="javascript:void(0)" class="wiki-task-pill" data-task-id="${escapedId}" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: var(--text-main); text-decoration: none; font-size: 12px; font-weight: 500;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${stColor};"></span><strong style="color: var(--primary);">📋 ${escapedTitle}</strong><span style="font-size: 10px; color: var(--text-muted);">(${stName} ${prog}%)</span></a>`
     })
   }
 

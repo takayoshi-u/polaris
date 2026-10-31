@@ -14,7 +14,13 @@
         </button>
         <span style="height: 16px; border-left: 1px solid var(--border-color);"></span>
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-muted); font-size: 13px;">
-          <span>{{ projectName || 'プロジェクト' }}</span>
+          <span
+            style="color: var(--primary); font-weight: 600; cursor: pointer; text-decoration: underline;"
+            title="ワークスペースに戻る"
+            @click="confirmClose"
+          >
+            {{ projectName || 'プロジェクト' }}
+          </span>
           <span>›</span>
           <span
             v-if="targetType === 'task' && parentIssueTitle"
@@ -1708,27 +1714,50 @@ function onKeydown(e: KeyboardEvent) {
 
   // Escape to close
   if (e.key === 'Escape') {
-    const activeEl = document.activeElement
+    const activeEl = document.activeElement as HTMLElement | null
     const isEditing = activeEl && (
       activeEl.tagName === 'INPUT' ||
       activeEl.tagName === 'TEXTAREA' ||
       activeEl.tagName === 'SELECT' ||
-      (activeEl as HTMLElement).isContentEditable
+      activeEl.isContentEditable
     )
-    if (!isEditing) {
-      confirmClose()
+    if (isEditing) {
+      activeEl.blur()
+      e.preventDefault()
+      return
     }
+    confirmClose()
   }
 }
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (isDirty.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+onBeforeRouteLeave((to, from, next) => {
+  if (isDirty.value) {
+    const ok = window.confirm('未保存の変更があります。破棄して移動しますか？')
+    if (!ok) {
+      next(false)
+      return
+    }
+  }
+  next()
+})
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('paste', onWindowPaste)
+  window.addEventListener('beforeunload', onBeforeUnload)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('paste', onWindowPaste)
+  window.removeEventListener('beforeunload', onBeforeUnload)
 })
 
 async function copyItemId() {

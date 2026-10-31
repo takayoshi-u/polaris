@@ -103,7 +103,18 @@
             v-for="sp in sprints"
             :key="sp.id"
             class="card"
-            style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;"
+            :style="{
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              transition: 'all 0.15s ease',
+              border: dragOverSprintId === sp.id ? '2px dashed var(--primary)' : '1px solid var(--border-color)',
+              backgroundColor: dragOverSprintId === sp.id ? 'var(--primary-soft)' : 'var(--bg-card)'
+            }"
+            @dragover.prevent="onDragOverSprint(sp.id)"
+            @dragleave="onDragLeaveSprint(sp.id)"
+            @drop="onDropToSprint(sp)"
           >
             <!-- Sprint Card Header -->
             <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
@@ -192,12 +203,27 @@
             <!-- Tasks in this sprint -->
             <div style="display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto;">
               <div v-if="getTasksForSprint(sp.id).length === 0" style="font-size: 12px; color: var(--text-muted); padding: 8px 0; text-align: center;">
-                割当タスクはありません
+                割当タスクはありません（タスクをここにドラッグ＆ドロップ）
               </div>
               <div
                 v-for="t in getTasksForSprint(sp.id)"
                 :key="t.id"
-                style="padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-main); display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px;"
+                :draggable="canEdit"
+                :style="{
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-main)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  fontSize: '12px',
+                  cursor: canEdit ? 'grab' : 'default',
+                  opacity: draggedTaskId === t.id ? 0.4 : 1
+                }"
+                @dragstart="onDragStart($event, t)"
+                @dragend="onDragEnd"
               >
                 <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
                   <span
@@ -244,15 +270,42 @@
             <span style="font-size: 12px; font-weight: normal;">{{ backlogTasks.length }}タスク ({{ backlogStoryPoints }} SP)</span>
           </h3>
 
-          <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div
+            class="card"
+            :style="{
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              transition: 'all 0.15s ease',
+              border: dragOverBacklog ? '2px dashed var(--primary)' : '1px solid var(--border-color)',
+              backgroundColor: dragOverBacklog ? 'var(--primary-soft)' : 'var(--bg-card)'
+            }"
+            @dragover.prevent="onDragOverBacklog"
+            @dragleave="onDragLeaveBacklog"
+            @drop="onDropToBacklog"
+          >
             <div v-if="backlogTasks.length === 0" style="padding: 30px; text-align: center; color: var(--text-muted); font-size: 13px;">
-              未割当のタスクはありません
+              未割当のタスクはありません（スプリントからここにドロップして解除）
             </div>
 
             <div
               v-for="t in backlogTasks"
               :key="t.id"
-              style="padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-main); display: flex; flex-direction: column; gap: 6px;"
+              :draggable="canEdit"
+              :style="{
+                padding: '10px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-main)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                cursor: canEdit ? 'grab' : 'default',
+                opacity: draggedTaskId === t.id ? 0.4 : 1
+              }"
+              @dragstart="onDragStart($event, t)"
+              @dragend="onDragEnd"
             >
               <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                 <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
@@ -721,6 +774,89 @@ async function onAssignDropdownChange(task: Task, event: Event) {
     emit('refresh')
   } catch (e: any) {
     notifyToast(e.message || 'タスクの割当に失敗しました', 'error')
+  }
+}
+
+// Drag and Drop (DnD) Support
+const draggedTaskId = ref<string | null>(null)
+const draggedTask = ref<Task | null>(null)
+const dragOverSprintId = ref<string | null>(null)
+const dragOverBacklog = ref(false)
+
+function onDragStart(event: DragEvent, task: Task) {
+  if (!props.canEdit) return
+  draggedTaskId.value = task.id
+  draggedTask.value = task
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', task.id)
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function onDragEnd() {
+  draggedTaskId.value = null
+  draggedTask.value = null
+  dragOverSprintId.value = null
+  dragOverBacklog.value = false
+}
+
+function onDragOverSprint(sprintId: string) {
+  if (!props.canEdit || !draggedTask.value) return
+  dragOverSprintId.value = sprintId
+}
+
+function onDragLeaveSprint(sprintId: string) {
+  if (dragOverSprintId.value === sprintId) {
+    dragOverSprintId.value = null
+  }
+}
+
+async function onDropToSprint(sprint: Sprint) {
+  if (!props.canEdit || !draggedTask.value) return
+  const task = draggedTask.value
+  dragOverSprintId.value = null
+  if (task.sprint_id === sprint.id) return
+
+  try {
+    await apiFetch(`/projects/${props.projectId}/tasks/${task.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ sprint_id: sprint.id })
+    })
+    notifyToast(`タスク「${task.title}」を「${sprint.name}」に割り当てました`, 'success')
+    emit('refresh')
+  } catch (e: any) {
+    notifyToast(e.message || 'タスクの割当に失敗しました', 'error')
+  } finally {
+    onDragEnd()
+  }
+}
+
+function onDragOverBacklog() {
+  if (!props.canEdit || !draggedTask.value) return
+  dragOverBacklog.value = true
+}
+
+function onDragLeaveBacklog() {
+  dragOverBacklog.value = false
+}
+
+async function onDropToBacklog() {
+  if (!props.canEdit || !draggedTask.value) return
+  const task = draggedTask.value
+  dragOverBacklog.value = false
+  if (!task.sprint_id) return
+
+  try {
+    await apiFetch(`/projects/${props.projectId}/tasks/${task.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ sprint_id: null })
+    })
+    notifyToast(`タスク「${task.title}」を未割当バックログに戻しました`, 'success')
+    emit('refresh')
+  } catch (e: any) {
+    notifyToast(e.message || 'バックログへの移動に失敗しました', 'error')
+  } finally {
+    onDragEnd()
   }
 }
 

@@ -16,16 +16,34 @@
           backgroundColor: 'var(--bg-card)',
           color: 'var(--text-main)',
           boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
-          fontSize: '13px'
+          fontSize: '13px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px'
         }"
       >
-        {{ t.text }}
+        <div style="display: flex; align-items: center; gap: 8px; word-break: break-word;">
+          <span style="font-size: 14px; flex-shrink: 0;">
+            {{ t.type === 'success' ? '✅' : t.type === 'error' ? '❌' : t.type === 'warning' ? '⚠️' : 'ℹ️' }}
+          </span>
+          <span>{{ t.text }}</span>
+        </div>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          style="padding: 2px 6px; font-size: 12px; line-height: 1; flex-shrink: 0;"
+          title="閉じる"
+          @click="removeToast(t.id)"
+        >
+          ✕
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-const { toasts } = usePolarisState()
+const { toasts, removeToast } = usePolarisState()
 </script>
 

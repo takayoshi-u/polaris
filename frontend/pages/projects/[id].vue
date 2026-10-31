@@ -406,6 +406,14 @@
         </div>
 
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            title="階層ペインの表示/非表示を切り替え"
+            @click="isGanttLeftCollapsed = !isGanttLeftCollapsed"
+          >
+            {{ isGanttLeftCollapsed ? '▶ 階層を表示' : '◀ 階層を隠す' }}
+          </button>
           <button class="btn btn-secondary btn-sm" @click="shiftTimeline(-7)">◀ -7日</button>
           <button class="btn btn-secondary btn-sm" @click="resetTimelineToday">今日へ</button>
           <button class="btn btn-primary btn-sm" @click="scrollToToday">📍 今日</button>
@@ -435,7 +443,7 @@
 
       <div class="gantt-container">
         <!-- Left Tree Pane -->
-        <div class="gantt-left">
+        <div v-show="!isGanttLeftCollapsed" class="gantt-left">
           <div class="gantt-row" style="height: 44px; background: var(--bg-elevated); padding: 0 12px; font-size: 13px; font-weight: 700;">
             <div style="flex: 1;">課題 / タスク階層</div>
             <div style="width: 96px; text-align: right;">予定/実績(h)</div>
@@ -1068,8 +1076,10 @@
             <span>同名の初期タスクを同時に1つ作成する（最も若いステータス列へ自動配置）</span>
           </label>
           <div style="display: flex; justify-content: flex-end; gap: 8px;">
-            <button type="button" class="btn btn-secondary" @click="showNewIssueModal = false">キャンセル</button>
-            <button type="submit" class="btn btn-primary">作成する</button>
+            <button type="button" class="btn btn-secondary" :disabled="isSubmittingIssue" @click="showNewIssueModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary" :disabled="isSubmittingIssue">
+              {{ isSubmittingIssue ? '⏳ 作成中...' : '作成する' }}
+            </button>
           </div>
         </form>
       </div>
@@ -1125,8 +1135,10 @@
             <textarea v-model="newTaskForm.description" rows="2" style="width: 100%;"></textarea>
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px;">
-            <button type="button" class="btn btn-secondary" @click="showNewTaskModal = false">キャンセル</button>
-            <button type="submit" class="btn btn-primary">タスクを作成</button>
+            <button type="button" class="btn btn-secondary" :disabled="isSubmittingTask" @click="showNewTaskModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary" :disabled="isSubmittingTask">
+              {{ isSubmittingTask ? '⏳ 作成中...' : 'タスクを作成' }}
+            </button>
           </div>
         </form>
       </div>
@@ -1418,7 +1430,27 @@ const router = useRouter()
 const { apiFetch, notifyToast, refreshProjects } = useApi()
 
 const projectId = computed(() => route.params.id as string)
-const activeTab = ref<'kanban' | 'gantt' | 'list' | 'sprint' | 'workload' | 'wiki' | 'activity' | 'settings'>('kanban')
+
+type ProjectTab = 'kanban' | 'gantt' | 'list' | 'sprint' | 'workload' | 'wiki' | 'activity' | 'settings'
+const validTabs: ProjectTab[] = ['kanban', 'gantt', 'list', 'sprint', 'workload', 'wiki', 'activity', 'settings']
+const initialTab = (route.query.tab as ProjectTab)
+const activeTab = ref<ProjectTab>(validTabs.includes(initialTab) ? initialTab : 'kanban')
+
+watch(activeTab, (newTab) => {
+  if (route.query.tab !== newTab) {
+    router.replace({ query: { ...route.query, tab: newTab } })
+  }
+})
+
+watch(() => route.query.tab, (tab) => {
+  if (tab && validTabs.includes(tab as ProjectTab) && activeTab.value !== tab) {
+    activeTab.value = tab as ProjectTab
+  }
+})
+
+const isSubmittingIssue = ref(false)
+const isSubmittingTask = ref(false)
+const isGanttLeftCollapsed = ref(false)
 
 const inboundWebhooks = ref<InboundWebhook[]>([])
 const showNewInboundWebhookModal = ref(false)
@@ -1773,7 +1805,47 @@ watch(activeTab, (tab) => {
   }
 })
 
+watch(isGanttLeftCollapsed, () => {
+  nextTick(() => {
+    updateTimelinePaneWidth()
+  })
+})
+
+function onProjectGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    if (createdInboundWebhook.value) {
+      createdInboundWebhook.value = null
+      return
+    }
+    if (showNewInboundWebhookModal.value) {
+      showNewInboundWebhookModal.value = false
+      return
+    }
+    if (showCSVImportModal.value) {
+      showCSVImportModal.value = false
+      return
+    }
+    if (showNewIssueModal.value) {
+      showNewIssueModal.value = false
+      return
+    }
+    if (showNewTaskModal.value) {
+      showNewTaskModal.value = false
+      return
+    }
+    if (selectedWebhookForLogs.value) {
+      selectedWebhookForLogs.value = null
+      return
+    }
+    if (editingWebhook.value) {
+      editingWebhook.value = null
+      return
+    }
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', onProjectGlobalKeydown)
   await loadWorkspace()
   nextTick(() => {
     updateTimelinePaneWidth()
@@ -1789,6 +1861,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onProjectGlobalKeydown)
   if (timelineResizeObserver) {
     timelineResizeObserver.disconnect()
     timelineResizeObserver = null
@@ -2161,10 +2234,19 @@ function openNewIssueModal() {
 }
 
 async function submitNewIssue() {
+  if (isSubmittingIssue.value) return
+  if (!newIssueForm.title.trim()) {
+    notifyToast('課題タイトルを入力してください', 'error')
+    return
+  }
+  isSubmittingIssue.value = true
   try {
     await apiFetch(`/projects/${projectId.value}/issues`, {
       method: 'POST',
-      body: JSON.stringify(newIssueForm)
+      body: JSON.stringify({
+        ...newIssueForm,
+        title: newIssueForm.title.trim()
+      })
     })
     showNewIssueModal.value = false
     await loadIssues()
@@ -2175,6 +2257,8 @@ async function submitNewIssue() {
     notifyToast('課題を作成しました', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  } finally {
+    isSubmittingIssue.value = false
   }
 }
 
@@ -2193,7 +2277,11 @@ function openNewTaskModal(iss: Issue) {
 }
 
 async function submitNewTask() {
-  if (!newTaskParentIssue.value) return
+  if (!newTaskParentIssue.value || isSubmittingTask.value) return
+  if (!newTaskForm.title.trim()) {
+    notifyToast('タスクタイトルを入力してください', 'error')
+    return
+  }
   const pHours = newTaskForm.planned_hours === '' ? null : Number(newTaskForm.planned_hours)
   const aHours = newTaskForm.actual_hours === '' ? null : Number(newTaskForm.actual_hours)
   const pCost = newTaskForm.planned_cost === '' ? null : Number(newTaskForm.planned_cost)
@@ -2214,12 +2302,13 @@ async function submitNewTask() {
     notifyToast('実績コストは小数点第2位までで入力してください', 'error')
     return
   }
+  isSubmittingTask.value = true
   try {
     await apiFetch(`/projects/${projectId.value}/tasks`, {
       method: 'POST',
       body: JSON.stringify({
         issue_id: newTaskParentIssue.value.id,
-        title: newTaskForm.title,
+        title: newTaskForm.title.trim(),
         description: newTaskForm.description,
         planned_start_date: newTaskForm.planned_start_date || null,
         planned_end_date: newTaskForm.planned_end_date || null,
@@ -2235,6 +2324,8 @@ async function submitNewTask() {
     notifyToast('子タスクを作成しました', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  } finally {
+    isSubmittingTask.value = false
   }
 }
 

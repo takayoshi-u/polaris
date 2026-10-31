@@ -4,12 +4,19 @@
   </div>
 
   <div v-else class="app-shell">
+    <!-- Backdrop overlay for mobile drawer -->
+    <div
+      v-if="isMobileSidebarOpen"
+      class="sidebar-backdrop"
+      @click="isMobileSidebarOpen = false"
+    ></div>
+
     <!-- Left Navigation Sidebar -->
-    <aside class="app-sidebar">
+    <aside class="app-sidebar" :class="{ 'mobile-open': isMobileSidebarOpen }">
       <div style="display: flex; flex-direction: column; gap: 20px;">
         <!-- Brand Header -->
         <div style="display: flex; align-items: center; justify-content: space-between;">
-          <NuxtLink to="/" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;">
+          <NuxtLink to="/" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;" @click="isMobileSidebarOpen = false">
             <div style="width: 34px; height: 34px; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 16px;">
               P
             </div>
@@ -18,14 +25,24 @@
               <div style="font-size: 12px; color: var(--text-muted);">Project Management</div>
             </div>
           </NuxtLink>
-          <button
-            v-if="hasSystemPerm('create_project')"
-            class="btn btn-primary btn-sm"
-            title="新規プロジェクト作成"
-            @click="showNewProjectModal = true"
-          >
-            <Plus :size="14" /> 新規
-          </button>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button
+              v-if="hasSystemPerm('create_project')"
+              class="btn btn-primary btn-sm"
+              title="新規プロジェクト作成"
+              @click="showNewProjectModal = true; isMobileSidebarOpen = false"
+            >
+              <Plus :size="14" /> 新規
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm mobile-sidebar-close-btn"
+              title="サイドバーを閉じる"
+              @click="isMobileSidebarOpen = false"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <!-- Current Project Selector -->
@@ -128,11 +145,37 @@
 
     <!-- Main Content -->
     <div class="app-main">
+      <!-- Mobile Top Bar (< 768px) -->
+      <header class="mobile-header">
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          style="padding: 6px 8px;"
+          title="メニューを開く"
+          aria-label="メニューを開く"
+          @click="isMobileSidebarOpen = true"
+        >
+          <Menu :size="20" />
+        </button>
+        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px;">
+          <div style="width: 24px; height: 24px; border-radius: 6px; background: #2563eb; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 12px;">
+            P
+          </div>
+          <span>Polaris</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button class="btn btn-secondary btn-sm" style="padding: 4px 8px;" title="通知一覧" @click="toggleNotifications">
+            <Bell :size="14" />
+            <span v-if="unreadCount > 0">{{ unreadCount }}</span>
+          </button>
+        </div>
+      </header>
+
       <!-- Notification Drawer Popover -->
       <div
         v-if="showNotifications"
         ref="notificationPopoverRef"
-        class="card"
+        class="card notification-popover"
         style="position: fixed; bottom: 72px; left: 268px; width: 390px; max-height: 460px; overflow-y: auto; z-index: 150; box-shadow: 0 10px 25px rgba(0,0,0,0.15);"
       >
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color);">
@@ -451,7 +494,7 @@
 </template>
 
 <script setup lang="ts">
-import { Bell, FolderKanban, LayoutGrid, Plus, Settings, ShieldCheck } from 'lucide-vue-next'
+import { Bell, FolderKanban, LayoutGrid, Menu, Plus, Settings, ShieldCheck } from 'lucide-vue-next'
 import type { NotificationItem, PersonalAccessToken } from '~/types/polaris'
 import { formatHours, formatJSTDateTime, hasAtMostTwoDecimals } from '~/utils/format'
 
@@ -488,9 +531,14 @@ const activeProject = computed(() => {
 
 const unreadCount = computed(() => notifications.value.filter(n => !n.is_read).length)
 
+const isMobileSidebarOpen = ref(false)
 const showNotifications = ref(false)
 const showNewProjectModal = ref(false)
 const showAccountModal = ref(false)
+
+watch(() => route.fullPath, () => {
+  isMobileSidebarOpen.value = false
+})
 
 const newProjForm = reactive({
   name: '',

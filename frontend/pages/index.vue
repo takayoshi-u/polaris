@@ -145,8 +145,10 @@
             <input v-model.number="newProjForm.hours_per_day" type="number" min="1" max="24" step="0.01" required style="width: 100%;" />
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
-            <button type="button" class="btn btn-secondary" @click="showCreateProjectModal = false">キャンセル</button>
-            <button type="submit" class="btn btn-primary">作成して開く</button>
+            <button type="button" class="btn btn-secondary" :disabled="isCreatingProject" @click="showCreateProjectModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary" :disabled="isCreatingProject">
+              {{ isCreatingProject ? '⏳ 作成中...' : '作成して開く' }}
+            </button>
           </div>
         </form>
       </div>
@@ -290,6 +292,7 @@ watch(projects, () => {
 
 // P-9 Create Project Modal
 const showCreateProjectModal = ref(false)
+const isCreatingProject = ref(false)
 const newProjForm = reactive({
   name: '',
   description: '',
@@ -297,11 +300,19 @@ const newProjForm = reactive({
 })
 
 async function submitCreateProject() {
-  if (!newProjForm.name.trim()) return
+  if (isCreatingProject.value) return
+  if (!newProjForm.name.trim()) {
+    notifyToast('プロジェクト名を入力してください', 'error')
+    return
+  }
+  isCreatingProject.value = true
   try {
     const created = await apiFetch<Project>('/projects', {
       method: 'POST',
-      body: JSON.stringify(newProjForm)
+      body: JSON.stringify({
+        ...newProjForm,
+        name: newProjForm.name.trim()
+      })
     })
     showCreateProjectModal.value = false
     newProjForm.name = ''
@@ -312,6 +323,8 @@ async function submitCreateProject() {
     router.push(`/projects/${created.id}`)
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  } finally {
+    isCreatingProject.value = false
   }
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -335,13 +336,24 @@ func (s *Server) handleProcessInboundWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	sigHeader := r.Header.Get("X-Polaris-Signature")
+	if sigHeader == "" {
+		sigHeader = r.Header.Get("X-Signature-256")
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.respondError(w, fmt.Errorf("%w: failed to read request body", store.ErrBadRequest))
+		return
+	}
+
 	var payload domain.InboundWebhookPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		s.respondError(w, fmt.Errorf("%w: invalid json payload", store.ErrBadRequest))
 		return
 	}
 
-	task, err := s.store.ProcessInboundWebhook(r.Context(), token, payload)
+	task, err := s.store.ProcessInboundWebhook(r.Context(), token, bodyBytes, sigHeader, payload)
 	if err != nil {
 		s.respondError(w, err)
 		return

@@ -41,57 +41,83 @@
         </div>
       </div>
 
-      <!-- View Tabs -->
-      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-        <button
-          class="btn"
-          :class="activeTab === 'kanban' ? 'btn-primary' : 'btn-secondary'"
-          @click="activeTab = 'kanban'"
-        >
-          📋 カンバン
-        </button>
-        <button
-          class="btn"
-          :class="activeTab === 'gantt' ? 'btn-primary' : 'btn-secondary'"
-          @click="activeTab = 'gantt'"
-        >
-          📊 ガント
-        </button>
-        <button
-          class="btn"
-          :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
-          @click="activeTab = 'list'"
-        >
-          📑 リスト / テーブル
-        </button>
-        <button
-          class="btn"
-          :class="activeTab === 'sprint' ? 'btn-primary' : 'btn-secondary'"
-          @click="activeTab = 'sprint'"
-        >
-          🏃 スプリント
-        </button>
-        <button
-          class="btn"
-          :class="activeTab === 'workload' ? 'btn-primary' : 'btn-secondary'"
-          @click="activeTab = 'workload'"
-        >
-          👥 リソース負荷
-        </button>
-        <button
-          v-if="project?.current_user_role === 'admin'"
-          class="btn"
-          :class="activeTab === 'settings' ? 'btn-primary' : 'btn-secondary'"
-          @click="activeTab = 'settings'"
-        >
-          ⚙️ プロジェクト設定
-        </button>
+      <!-- View Tabs & Workspace Actions -->
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          <button
+            class="btn"
+            :class="activeTab === 'kanban' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'kanban'"
+          >
+            📋 カンバン
+          </button>
+          <button
+            class="btn"
+            :class="activeTab === 'gantt' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'gantt'"
+          >
+            📊 ガント
+          </button>
+          <button
+            class="btn"
+            :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'list'"
+          >
+            📑 リスト / テーブル
+          </button>
+          <button
+            class="btn"
+            :class="activeTab === 'sprint' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'sprint'"
+          >
+            🏃 スプリント
+          </button>
+          <button
+            class="btn"
+            :class="activeTab === 'workload' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'workload'"
+          >
+            👥 リソース負荷
+          </button>
+          <button
+            class="btn"
+            :class="activeTab === 'wiki' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'wiki'"
+          >
+            📖 Wiki
+          </button>
+          <button
+            class="btn"
+            :class="activeTab === 'activity' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'activity'"
+          >
+            ⏱️ アクティビティ
+          </button>
+          <button
+            v-if="project?.current_user_role === 'admin'"
+            class="btn"
+            :class="activeTab === 'settings' ? 'btn-primary' : 'btn-secondary'"
+            @click="activeTab = 'settings'"
+          >
+            ⚙️ プロジェクト設定
+          </button>
+        </div>
+
+        <!-- CSV Export / Import Buttons -->
+        <div style="display: flex; gap: 6px; border-left: 1px solid var(--border-color); padding-left: 10px;">
+          <button class="btn btn-secondary btn-sm" title="タスクデータをCSVでエクスポート" @click="exportProjectCSV">
+            📤 CSV エクスポート
+          </button>
+          <button v-if="canEditProjectItems" class="btn btn-secondary btn-sm" title="CSVからタスクを一括インポート" @click="showCSVImportModal = true">
+            📥 CSV インポート
+          </button>
+        </div>
       </div>
     </div>
 
     <!-- Common Filter Bar (Kanban / Gantt / List) -->
     <div
-      v-if="activeTab !== 'settings' && activeTab !== 'sprint' && activeTab !== 'workload'"
+      v-if="activeTab !== 'settings' && activeTab !== 'sprint' && activeTab !== 'workload' && activeTab !== 'wiki' && activeTab !== 'activity'"
       class="card"
       style="padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;"
     >
@@ -720,7 +746,29 @@
       />
     </section>
 
-    <!-- VIEW 4: PROJECT SETTINGS & TEMPLATE BUILDER (Admin Role) -->
+    <!-- VIEW 6: WIKI VIEW -->
+    <section v-if="activeTab === 'wiki'">
+      <WikiView
+        :project-id="projectId"
+        :tasks="allTasks"
+        :statuses="statuses"
+        :can-edit="canEditProjectItems"
+        @open-task="openTaskDetailStandalone"
+      />
+    </section>
+
+    <!-- VIEW 7: ACTIVITY LOG VIEW -->
+    <section v-if="activeTab === 'activity'">
+      <ActivityLogView
+        :project-id="projectId"
+        :users="users"
+        :statuses="statuses"
+        @open-task="openTargetFromQuery"
+        @open-issue="openTargetFromQuery"
+      />
+    </section>
+
+    <!-- VIEW 8: PROJECT SETTINGS & TEMPLATE BUILDER (Admin Role) -->
     <section v-if="activeTab === 'settings' && project" style="display: flex; flex-direction: column; gap: 20px;">
       <!-- 1. Project General Settings -->
       <div class="card">
@@ -954,6 +1002,52 @@
           </div>
         </div>
       </div>
+
+      <!-- 6. Inbound Webhook 連携（外部タスク自動起票） -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+          <div>
+            <h3 style="font-size: 15px; font-weight: 700;">Inbound Webhook 連携（外部タスク自動起票）</h3>
+            <p style="font-size: 12px; color: var(--text-muted);">
+              CI/CD（GitHub Actions、CircleCI等）や外部監視ツールからHTTP POSTを受信し、本プロジェクト内にタスクを自動起票します。
+            </p>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="openNewInboundWebhookModal">＋ Inbound Webhook を作成</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div
+            v-for="wh in inboundWebhooks"
+            :key="wh.id"
+            style="padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;"
+          >
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span :class="['badge', wh.is_active ? 'badge-green' : 'badge-slate']">
+                  {{ wh.is_active ? '有効' : '無効' }}
+                </span>
+                <strong style="font-size: 14px;">{{ wh.name }}</strong>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--text-muted);">
+                <span v-if="wh.default_issue_id">
+                  デフォルト課題: {{ issues.find(i => i.id === wh.default_issue_id)?.title || wh.default_issue_id }}
+                </span>
+                <span v-if="wh.default_status_id">
+                  デフォルトステータス: {{ statuses.find(s => s.id === wh.default_status_id)?.name || wh.default_status_id }}
+                </span>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="btn btn-danger btn-sm" style="font-size: 12px;" @click="deleteInboundWebhook(wh.id)">削除</button>
+            </div>
+          </div>
+
+          <div v-if="inboundWebhooks.length === 0" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">
+            登録された Inbound Webhook はありません
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- New Issue Modal (with create_initial_task toggle) -->
@@ -1184,6 +1278,106 @@
       </div>
     </div>
 
+    <!-- New Inbound Webhook Modal -->
+    <div v-if="showNewInboundWebhookModal" class="modal-backdrop" @click.self="showNewInboundWebhookModal = false">
+      <div class="modal-panel" style="max-width: 520px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規 Inbound Webhook の登録</h3>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createInboundWebhook">
+          <div>
+            <label class="field-label">Webhook 名 *</label>
+            <input v-model="newInboundWebhookForm.name" type="text" required style="width: 100%;" placeholder="例: GitHub Actions CI Failure" />
+          </div>
+          <div>
+            <label class="field-label">デフォルト起票先課題 (任意)</label>
+            <select v-model="newInboundWebhookForm.default_issue_id" style="width: 100%;">
+              <option value="">指定なし（リクエスト本文で issue_id を指定）</option>
+              <option v-for="iss in issues" :key="iss.id" :value="iss.id">{{ iss.title }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">デフォルトステータス (任意)</label>
+            <select v-model="newInboundWebhookForm.default_status_id" style="width: 100%;">
+              <option :value="undefined">指定なし（初期ステータスを使用）</option>
+              <option v-for="st in statuses" :key="st.id" :value="st.id">{{ st.display_order }}. {{ st.name }}</option>
+            </select>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+            <button type="button" class="btn btn-secondary" @click="showNewInboundWebhookModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary">作成してトークン発行</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Inbound Webhook Created Dialog (One-time token & secret display) -->
+    <div v-if="createdInboundWebhook" class="modal-backdrop" @click.self="createdInboundWebhook = null">
+      <div class="modal-panel" style="max-width: 620px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <h3 style="font-size: 16px; font-weight: 700; color: #10b981;">
+            ✅ Inbound Webhook を作成しました
+          </h3>
+          <button class="btn btn-secondary btn-sm" @click="createdInboundWebhook = null">閉じる</button>
+        </div>
+
+        <div style="padding: 10px 12px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); margin-bottom: 16px; font-size: 13px; color: #d97706;">
+          ⚠️ <strong>注意:</strong> 生成されたトークンおよびシークレットは<strong>この画面を閉じると二度と表示されません</strong>。安全な場所に保存してください。
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div>
+            <label class="field-label">受信エンドポイント URL (公開POST受信用)</label>
+            <div style="display: flex; gap: 8px;">
+              <input :value="inboundWebhookUrl" readonly style="flex: 1; font-family: monospace; font-size: 12px; background: var(--bg-input);" />
+              <button type="button" class="btn btn-secondary btn-sm" @click="copyToClipboard(inboundWebhookUrl, 'URLをコピー')">コピー</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="field-label">認証トークン (Path Token)</label>
+            <div style="display: flex; gap: 8px;">
+              <input :value="createdInboundWebhook.token" readonly style="flex: 1; font-family: monospace; font-size: 12px; background: var(--bg-input);" />
+              <button type="button" class="btn btn-secondary btn-sm" @click="copyToClipboard(createdInboundWebhook.token, 'トークンをコピー')">コピー</button>
+            </div>
+          </div>
+
+          <div v-if="createdInboundWebhook.secret">
+            <label class="field-label">署名検証シークレット (Secret)</label>
+            <div style="display: flex; gap: 8px;">
+              <input :value="createdInboundWebhook.secret" readonly style="flex: 1; font-family: monospace; font-size: 12px; background: var(--bg-input);" />
+              <button type="button" class="btn btn-secondary btn-sm" @click="copyToClipboard(createdInboundWebhook.secret, 'シークレットをコピー')">コピー</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="field-label">連携例 (curl / GitHub Actions / CI)</label>
+            <div style="position: relative;">
+              <pre style="padding: 10px 12px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 6px; font-family: monospace; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">{{ inboundCurlExample }}</pre>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                style="position: absolute; top: 8px; right: 8px; font-size: 11px;"
+                @click="copyToClipboard(inboundCurlExample, 'curlコマンドをコピー')"
+              >
+                コピー
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 18px;">
+          <button class="btn btn-primary" @click="createdInboundWebhook = null">保存したので閉じる</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CSV Import Modal -->
+    <CSVImportModal
+      v-if="showCSVImportModal"
+      :project-id="projectId"
+      @close="showCSVImportModal = false"
+      @imported="refreshAllWorkspace"
+    />
+
     </template>
   </div>
 </template>
@@ -1192,6 +1386,7 @@
 import type {
   CustomFieldDefinition,
   Group,
+  InboundWebhook,
   Issue,
   Label,
   Project,
@@ -1223,7 +1418,30 @@ const router = useRouter()
 const { apiFetch, notifyToast, refreshProjects } = useApi()
 
 const projectId = computed(() => route.params.id as string)
-const activeTab = ref<'kanban' | 'gantt' | 'list' | 'sprint' | 'workload' | 'settings'>('kanban')
+const activeTab = ref<'kanban' | 'gantt' | 'list' | 'sprint' | 'workload' | 'wiki' | 'activity' | 'settings'>('kanban')
+
+const inboundWebhooks = ref<InboundWebhook[]>([])
+const showNewInboundWebhookModal = ref(false)
+const newInboundWebhookForm = reactive({
+  name: '',
+  default_issue_id: '',
+  default_status_id: undefined as number | undefined
+})
+const createdInboundWebhook = ref<InboundWebhook | null>(null)
+const showCSVImportModal = ref(false)
+
+const inboundWebhookUrl = computed(() => {
+  if (!createdInboundWebhook.value) return ''
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}/api/v1/inbound-webhooks/${createdInboundWebhook.value.token}`
+})
+
+const inboundCurlExample = computed(() => {
+  if (!createdInboundWebhook.value) return ''
+  return `curl -X POST "${inboundWebhookUrl.value}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"title": "CIテスト失敗の自動報告", "description": "ビルド #123 でテストが失敗しました"}'`
+})
 
 const project = ref<Project | null>(null)
 const statuses = ref<Status[]>([])
@@ -1693,6 +1911,7 @@ async function loadWorkspace() {
     await loadIssues()
     if (project.value?.current_user_role === 'admin') {
       await loadProjectWebhooks()
+      await loadInboundWebhooks()
     }
     const targetQuery = route.query.item || route.query.openTarget
     if (targetQuery) {
@@ -1795,6 +2014,7 @@ async function onTaskDropKanban(targetIssueId: string, targetStatusId: string, t
     await loadIssues()
     if (project.value?.current_user_role === 'admin') {
       await loadProjectWebhooks()
+      await loadInboundWebhooks()
     }
   } catch (e: any) {
     notifyToast(e.message, 'error')
@@ -1950,6 +2170,7 @@ async function submitNewIssue() {
     await loadIssues()
     if (project.value?.current_user_role === 'admin') {
       await loadProjectWebhooks()
+      await loadInboundWebhooks()
     }
     notifyToast('課題を作成しました', 'success')
   } catch (e: any) {
@@ -2377,6 +2598,86 @@ async function deleteProjectWebhook(webhookId: string) {
     notifyToast('Webhook を削除しました', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  }
+}
+
+// CSV Export
+async function exportProjectCSV() {
+  try {
+    const blob = await apiFetch<Blob>(`/projects/${projectId.value}/export/csv`)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const pName = (project.value?.name || 'project').replace(/[^\w\s-]/gi, '_')
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    a.download = `polaris_${pName}_${today}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    notifyToast('CSVをエクスポートしました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message || 'CSVエクスポートに失敗しました', 'error')
+  }
+}
+
+// Inbound Webhooks
+async function loadInboundWebhooks() {
+  try {
+    inboundWebhooks.value = await apiFetch<InboundWebhook[]>(`/projects/${projectId.value}/inbound-webhooks`)
+  } catch (e: any) {
+    // ignore
+  }
+}
+
+function openNewInboundWebhookModal() {
+  newInboundWebhookForm.name = ''
+  newInboundWebhookForm.default_issue_id = ''
+  newInboundWebhookForm.default_status_id = undefined
+  showNewInboundWebhookModal.value = true
+}
+
+async function createInboundWebhook() {
+  try {
+    const payload: { name: string; default_issue_id?: string; default_status_id?: number } = {
+      name: newInboundWebhookForm.name
+    }
+    if (newInboundWebhookForm.default_issue_id) {
+      payload.default_issue_id = newInboundWebhookForm.default_issue_id
+    }
+    if (newInboundWebhookForm.default_status_id) {
+      payload.default_status_id = Number(newInboundWebhookForm.default_status_id)
+    }
+    const created = await apiFetch<InboundWebhook>(`/projects/${projectId.value}/inbound-webhooks`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+    showNewInboundWebhookModal.value = false
+    createdInboundWebhook.value = created
+    await loadInboundWebhooks()
+    notifyToast('Inbound Webhook を作成しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteInboundWebhook(id: string) {
+  if (!confirm('この Inbound Webhook を削除しますか？\n削除するとこのトークンを使用した自動起票はすべて拒否されます。')) return
+  try {
+    await apiFetch(`/inbound-webhooks/${id}`, { method: 'DELETE' })
+    await loadInboundWebhooks()
+    notifyToast('Inbound Webhook を削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function copyToClipboard(text: string, label: string = 'コピー') {
+  try {
+    await navigator.clipboard.writeText(text)
+    notifyToast(`${label}しました`, 'success')
+  } catch (e) {
+    notifyToast('クリップボードへのコピーに失敗しました', 'error')
   }
 }
 </script>

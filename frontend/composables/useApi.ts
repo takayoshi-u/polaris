@@ -50,6 +50,14 @@ export function useApi() {
     if (res.status === 204) {
       return undefined as unknown as T
     }
+    const contentType = res.headers.get('Content-Type') || ''
+    if (contentType.includes('text/csv') || contentType.includes('application/octet-stream')) {
+      if (!res.ok) {
+        throw new Error(`API Error (${res.status})`)
+      }
+      const blob = await res.blob()
+      return blob as unknown as T
+    }
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       const err: any = new Error(data?.error || `API Error (${res.status})`)

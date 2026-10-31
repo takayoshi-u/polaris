@@ -131,6 +131,103 @@ export function renderSafeMarkdown(mdText?: string | null): string {
   return rawHtml
 }
 
+/**
+ * Formats an ISO date string to a Japanese relative time string (e.g. "たった今", "5分前", "2時間前", "昨日").
+ */
+export function formatRelativeTime(isoStr?: string | null): string {
+  if (!isoStr) return '-'
+  const d = new Date(isoStr)
+  if (Number.isNaN(d.getTime())) return isoStr
+  const now = Date.now()
+  const diffSec = Math.floor((now - d.getTime()) / 1000)
+  if (diffSec < 60) return 'たった今'
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}分前`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}時間前`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay === 1) return '昨日'
+  if (diffDay < 7) return `${diffDay}日前`
+  return formatJSTDateTime(isoStr)
+}
+
+export interface TaskEmbedInfo {
+  id: string
+  title: string
+  status_id?: string
+  progress?: number
+  planned_hours?: number | null
+}
+
+/**
+ * Escapes HTML characters in a string to prevent XSS.
+ */
+export function escapeHtml(str?: string | null): string {
+  if (!str) return ''
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Renders Markdown for Wiki with task embed tokens (task:UUID or #taskTitle) replaced with rich interactive pills.
+ */
+export function renderWikiMarkdownWithTaskEmbeds(
+  mdText?: string | null,
+  tasks: TaskEmbedInfo[] = [],
+  statusMap: Map<string, { name: string; color: string }> = new Map()
+): string {
+  if (!mdText) return ''
+
+  let processed = mdText
+
+  // 1. Match task:UUID
+  processed = processed.replace(/\btask:([0-9a-fA-F-]{36})\b/g, (match, taskId) => {
+    const t = tasks.find(x => x.id === taskId)
+    if (!t) return match
+    const st = t.status_id ? statusMap.get(t.status_id) : undefined
+    const stColor = st?.color || '#3b82f6'
+    const stName = escapeHtml(st?.name || 'ステータス未設定')
+    const escapedTitle = escapeHtml(t.title)
+    const escapedId = escapeHtml(t.id)
+    const prog = t.progress ?? 0
+    return `<a href="javascript:void(0)" class="wiki-task-pill" data-task-id="${escapedId}" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: var(--text-main); text-decoration: none; font-size: 12px; font-weight: 500;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${stColor};"></span><strong style="color: var(--primary);">📋 ${escapedTitle}</strong><span style="font-size: 10px; color: var(--text-muted);">(${stName} ${prog}%)</span></a>`
+  })
+
+  // 2. Match #TaskTitle (when exact task title matches)
+  if (tasks.length > 0) {
+    const titleMap = new Map<string, TaskEmbedInfo>()
+    for (const t of tasks) {
+      if (t.title && t.title.trim()) {
+        titleMap.set(t.title.trim(), t)
+      }
+    }
+    processed = processed.replace(/#([^\s#<>\[\]]+)/g, (match, rawTitle) => {
+      const t = titleMap.get(rawTitle)
+      if (!t) return match
+      const st = t.status_id ? statusMap.get(t.status_id) : undefined
+      const stColor = st?.color || '#3b82f6'
+      const stName = escapeHtml(st?.name || 'ステータス未設定')
+      const escapedTitle = escapeHtml(t.title)
+      const escapedId = escapeHtml(t.id)
+      const prog = t.progress ?? 0
+      return `<a href="javascript:void(0)" class="wiki-task-pill" data-task-id="${escapedId}" style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: var(--text-main); text-decoration: none; font-size: 12px; font-weight: 500;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${stColor};"></span><strong style="color: var(--primary);">📋 ${escapedTitle}</strong><span style="font-size: 10px; color: var(--text-muted);">(${stName} ${prog}%)</span></a>`
+    })
+  }
+
+  const rawHtml = marked.parse(processed, { async: false }) as string
+  if (typeof window !== 'undefined' && DOMPurify?.sanitize) {
+    return DOMPurify.sanitize(rawHtml, {
+      ADD_ATTR: ['data-task-id', 'target']
+    })
+  }
+  return rawHtml
+}
+
+
 export interface AutoScheduleUpdate {
   taskId: string
   planned_start_date: string

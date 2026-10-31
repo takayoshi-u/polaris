@@ -526,3 +526,29 @@ type InboundWebhookPayload struct {
 	LabelIDs     []string `json:"label_ids"`
 }
 
+// Bulk User Invitations
+type UserInviteItem struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+}
+
+type BulkInviteRequest struct {
+	Invitations        []UserInviteItem `json:"invitations"`
+	DefaultGroupIDs    []string         `json:"default_group_ids"`
+	DefaultPermissions []string         `json:"default_permissions"`
+}
+
+type BulkInviteFailure struct {
+	Email  string `json:"email"`
+	Reason string `json:"reason"`
+}
+
+type BulkInviteResult struct {
+	Total        int                 `json:"total"`
+	InvitedCount int                 `json:"invited_count"`
+	FailedCount  int                 `json:"failed_count"`
+	InvitedUsers []*User             `json:"invited_users"`
+	Failures     []BulkInviteFailure `json:"failures"`
+}
+
+

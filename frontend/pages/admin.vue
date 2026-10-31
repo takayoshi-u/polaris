@@ -131,7 +131,17 @@
             <div style="font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
               <span>✉️</span><span>招待メールで登録</span>
             </div>
-            <span class="badge badge-amber" style="font-size: 10px;">72時間有効</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="badge badge-amber" style="font-size: 10px;">72時間有効</span>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="showBulkInviteModal = true"
+              >
+                📥 リストから一括招待
+              </button>
+            </div>
           </div>
           <form style="display: flex; flex-direction: column; gap: 8px; justify-content: space-between; flex: 1;" @submit.prevent="inviteNewUser">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -144,7 +154,14 @@
                 <input v-model="inviteForm.display_name" type="text" required placeholder="佐藤 健" style="width: 100%;" />
               </div>
             </div>
-            <div style="display: flex; justify-content: flex-end; padding-top: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 4px;">
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                @click="showBulkInviteModal = true"
+              >
+                📥 リストから一括招待
+              </button>
               <button type="submit" class="btn btn-secondary btn-sm" :disabled="submittingUser">
                 {{ submittingUser ? '送信中...' : '✉️ 招待メールを送信' }}
               </button>
@@ -230,12 +247,21 @@
               </button>
             </div>
           </div>
-          <input
-            v-model="userSearchQuery"
-            type="text"
-            placeholder="表示名・メールで絞り込み..."
-            style="width: 220px; font-size: 13px;"
-          />
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              @click="showBulkInviteModal = true"
+            >
+              📥 リストから一括招待
+            </button>
+            <input
+              v-model="userSearchQuery"
+              type="text"
+              placeholder="表示名・メールで絞り込み..."
+              style="width: 220px; font-size: 13px;"
+            />
+          </div>
         </div>
 
         <div style="overflow-x: auto;">
@@ -1255,6 +1281,16 @@
         </div>
       </div>
     </div>
+
+    <!-- Bulk User Invite Modal -->
+    <BulkInviteModal
+      v-if="showBulkInviteModal"
+      :allowed-domains="allowedDomainsList"
+      :existing-users="users"
+      :groups="globalGroups"
+      @close="showBulkInviteModal = false"
+      @invited="loadAdminData"
+    />
   </div>
 </template>
 
@@ -1307,6 +1343,7 @@ const userSearchQuery = ref('')
 const userStatusFilter = ref<'all' | 'active' | 'invited' | 'disabled'>('all')
 const userPage = ref(1)
 const userPageSize = 10
+const showBulkInviteModal = ref(false)
 
 const filteredUsers = computed(() => {
   let list = users.value

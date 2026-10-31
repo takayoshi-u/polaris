@@ -388,5 +388,29 @@ export interface CSVImportResult {
   errors: string[]
 }
 
+export interface UserInviteItem {
+  email: string
+  display_name?: string
+}
+
+export interface BulkInviteRequest {
+  invitations: UserInviteItem[]
+  default_group_ids?: string[]
+  default_permissions?: string[]
+}
+
+export interface BulkInviteFailure {
+  email: string
+  reason: string
+}
+
+export interface BulkInviteResult {
+  total: number
+  invited_count: number
+  failed_count: number
+  invited_users: User[]
+  failures: BulkInviteFailure[]
+}
+
 
 

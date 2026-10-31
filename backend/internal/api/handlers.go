@@ -425,6 +425,25 @@ func (s *Server) handleInviteUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, u)
 }
 
+func (s *Server) handleBulkInviteUsers(w http.ResponseWriter, r *http.Request) {
+	var body domain.BulkInviteRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	if len(body.Invitations) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invitations list cannot be empty"})
+		return
+	}
+
+	result, err := s.store.BulkInviteUsers(r.Context(), body.Invitations, body.DefaultGroupIDs, body.DefaultPermissions)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleResendInvite(w http.ResponseWriter, r *http.Request) {
 	rawToken, err := s.store.ResendInvite(r.Context(), r.PathValue("userId"))
 	if err != nil {

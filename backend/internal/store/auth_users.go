@@ -452,6 +452,172 @@ func (s *Store) InviteUser(ctx context.Context, email, displayName string, group
 	return u, rawToken, err
 }
 
+// BulkInviteUsers invites multiple users in batch, validating allowed domains and existing users.
+func (s *Store) BulkInviteUsers(ctx context.Context, invitations []domain.UserInviteItem, defaultGroupIDs []string, defaultPermissions []string) (*domain.BulkInviteResult, error) {
+	allowedDomains, err := s.GetAllowedDomains(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &domain.BulkInviteResult{
+		Total:        len(invitations),
+		InvitedUsers: []*domain.User{},
+		Failures:     []domain.BulkInviteFailure{},
+	}
+
+	seenInBatch := make(map[string]bool)
+
+	for _, inv := range invitations {
+		rawEmail := strings.TrimSpace(inv.Email)
+		cleanEmail := strings.ToLower(rawEmail)
+
+		if cleanEmail == "" || !strings.Contains(cleanEmail, "@") {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "メールアドレスの形式が不正です",
+			})
+			continue
+		}
+
+		// Validate domain restriction
+		if err := domain.ValidateEmailAllowedDomain(cleanEmail, allowedDomains); err != nil {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "メールアドレスのドメインが許可されていません",
+			})
+			continue
+		}
+
+		// Duplicate in input batch
+		if seenInBatch[cleanEmail] {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "既に登録されているユーザーです",
+			})
+			continue
+		}
+		seenInBatch[cleanEmail] = true
+
+		// Check if already in DB
+		var existingCount int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1`, cleanEmail).Scan(&existingCount); err != nil {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "データベースエラーが発生しました",
+			})
+			continue
+		}
+		if existingCount > 0 {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "既に登録されているユーザーです",
+			})
+			continue
+		}
+
+		displayName := strings.TrimSpace(inv.DisplayName)
+		if displayName == "" {
+			displayName = strings.Split(cleanEmail, "@")[0]
+		}
+
+		// Transaction per user
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "データベースエラーが発生しました",
+			})
+			continue
+		}
+
+		userID := id.NewV7String()
+		now := time.Now().UTC()
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO users (id, email, display_name, status, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $5)
+		`, userID, cleanEmail, displayName, domain.UserStatusInvited, now); err != nil {
+			_ = tx.Rollback()
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "ユーザー作成に失敗しました",
+			})
+			continue
+		}
+
+		for _, gid := range defaultGroupIDs {
+			if gid != "" {
+				_, _ = tx.ExecContext(ctx, `
+					INSERT INTO group_members (id, group_id, user_id, created_at)
+					VALUES ($1, $2, $3, $4)
+					ON CONFLICT DO NOTHING
+				`, id.NewV7String(), gid, userID, now)
+			}
+		}
+
+		for _, perm := range defaultPermissions {
+			if perm != "" {
+				_, _ = tx.ExecContext(ctx, `
+					INSERT INTO system_permissions (id, subject_type, subject_id, permission, created_at)
+					VALUES ($1, $2, $3, $4, $5)
+					ON CONFLICT DO NOTHING
+				`, id.NewV7String(), domain.SubjectUser, userID, perm, now)
+			}
+		}
+
+		rawToken, tokenHash, err := crypto.GenerateRandomToken(32)
+		if err != nil {
+			_ = tx.Rollback()
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "トークン生成に失敗しました",
+			})
+			continue
+		}
+
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO email_verification_tokens (id, user_id, token_type, token_hash, expires_at, created_at)
+			VALUES ($1, $2, 'invite', $3, $4, $5)
+		`, id.NewV7String(), userID, tokenHash, now.Add(InviteTokenTTL), now); err != nil {
+			_ = tx.Rollback()
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "トークン保存に失敗しました",
+			})
+			continue
+		}
+
+		if err := tx.Commit(); err != nil {
+			result.Failures = append(result.Failures, domain.BulkInviteFailure{
+				Email:  rawEmail,
+				Reason: "トランザクションコミットに失敗しました",
+			})
+			continue
+		}
+
+		inviteURL := fmt.Sprintf("%s/auth/invite?token=%s", strings.TrimRight(s.appBaseURL, "/"), rawToken)
+		_ = s.sendSystemEmail(ctx, cleanEmail, "[Polaris] 招待のご案内", fmt.Sprintf(
+			"%s 様\n\nPolarisへ招待されました。以下のリンク（有効期限：72時間）から初期設定を行ってください。\n%s\n",
+			displayName, inviteURL,
+		))
+
+		result.InvitedUsers = append(result.InvitedUsers, &domain.User{
+			ID:          userID,
+			Email:       cleanEmail,
+			DisplayName: displayName,
+			Status:      domain.UserStatusInvited,
+			InviteURL:   inviteURL,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
+
+	result.InvitedCount = len(result.InvitedUsers)
+	result.FailedCount = len(result.Failures)
+
+	return result, nil
+}
+
+
 // ResendInvite regenerates a 72h invitation token and resends the email.
 func (s *Store) ResendInvite(ctx context.Context, userID string) (string, error) {
 	u, err := s.GetUserByID(ctx, userID)

@@ -1,0 +1,2187 @@
+<template>
+  <div style="display: flex; flex-direction: column; gap: 18px;">
+    <!-- DEDICATED DETAIL PAGE TRANSITION VIEW -->
+    <ItemDetailModal
+      v-if="detailModalState.open"
+      :project-id="projectId"
+      :project-name="project?.name"
+      :target-type="detailModalState.targetType"
+      :issue="detailModalState.issue"
+      :task="detailModalState.task"
+      :parent-issue-title="detailModalState.parentIssueTitle"
+      :current-user-role="project?.current_user_role || 'viewer'"
+      :statuses="statuses"
+      :labels="allLabels"
+      :custom-fields="customFields"
+      :templates="templates"
+      :users="users"
+      :groups="allGroups"
+      @close="closeDetailView"
+      @updated="onDetailUpdated"
+    />
+
+    <!-- WORKSPACE VIEWS -->
+    <template v-else>
+      <!-- Top Project Workspace Subheader & View Switcher -->
+      <div class="card" style="padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+            <h1 style="font-size: 17px; font-weight: 700;">{{ project?.name || 'プロジェクト' }}</h1>
+            <span v-if="project" class="badge badge-blue">
+              基準: {{ formatHours(project.hours_per_day) }}h / 日 ・ Role: {{ project.current_user_role.toUpperCase() }}
+            </span>
+            <span v-if="project" class="badge badge-green">
+              PJ総コスト(予/実): {{ formatCost(project.total_planned_cost) }} / {{ formatCost(project.total_actual_cost) }}
+            </span>
+          </div>
+          <p style="font-size: 12px; color: var(--text-muted);">{{ project?.description }}</p>
+        </div>
+      </div>
+
+      <!-- View Tabs -->
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <button
+          class="btn"
+          :class="activeTab === 'kanban' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'kanban'"
+        >
+          1. マトリクス・カンバン
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'gantt' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'gantt'"
+        >
+          2. 予実ガントチャート
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'list'"
+        >
+          3. 課題・タスク一覧
+        </button>
+        <button
+          v-if="project?.current_user_role === 'admin'"
+          class="btn"
+          :class="activeTab === 'settings' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'settings'"
+        >
+          4. プロジェクト設定
+        </button>
+      </div>
+    </div>
+
+    <!-- Common Filter Bar (Kanban / Gantt / List) -->
+    <div
+      v-if="activeTab !== 'settings'"
+      class="card"
+      style="padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;"
+    >
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+        <input
+          v-model="filters.keyword"
+          type="text"
+          placeholder="キーワード検索..."
+          style="width: 220px;"
+          @keyup.enter="loadIssues"
+        />
+
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <span style="color: var(--text-muted);">課題状態:</span>
+          <select v-model="filters.issue_state" @change="loadIssues">
+            <option value="open">オープン</option>
+            <option value="closed">クローズ</option>
+            <option value="all">すべて</option>
+          </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <span style="color: var(--text-muted);">ステータス:</span>
+          <select v-model="filters.status_id" @change="loadIssues">
+            <option value="">すべて</option>
+            <option v-for="st in statuses" :key="st.id" :value="st.id">
+              {{ st.display_order }}. {{ st.name }}
+            </option>
+          </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <span style="color: var(--text-muted);">担当者:</span>
+          <select v-model="filters.assignee_id" @change="loadIssues">
+            <option value="">すべて</option>
+            <optgroup label="ユーザー">
+              <option v-for="u in users" :key="u.id" :value="u.id">👤 {{ u.display_name }}</option>
+            </optgroup>
+            <optgroup label="グループ">
+              <option v-for="g in allGroups" :key="g.id" :value="g.id">👥 {{ g.name }}</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- AND Label Multi-Select Pills -->
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px;">
+          <span style="color: var(--text-muted);">ラベル(AND):</span>
+          <button
+            v-for="lb in allLabels"
+            :key="lb.id"
+            type="button"
+            class="btn btn-sm"
+            :style="{
+              padding: '2px 8px',
+              fontSize: '11px',
+              borderColor: filters.label_ids.includes(lb.id) ? lb.color : 'var(--border-color)',
+              backgroundColor: filters.label_ids.includes(lb.id) ? 'rgba(59,130,246,0.2)' : 'var(--bg-input)',
+              color: lb.color
+            }"
+            @click="toggleFilterLabel(lb.id)"
+          >
+            ● {{ lb.name }}
+          </button>
+        </div>
+
+        <button class="btn btn-secondary btn-sm" @click="loadIssues">検索</button>
+      </div>
+
+      <div v-if="canEditProjectItems" style="display: flex; gap: 8px;">
+        <button class="btn btn-primary" @click="openNewIssueModal">
+          ＋ 新規課題作成
+        </button>
+      </div>
+    </div>
+
+    <!-- VIEW 1: MATRIX KANBAN BOARD -->
+    <section v-if="activeTab === 'kanban'" style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <h2 style="font-size: 16px; font-weight: 700;">
+            マトリクス・カンバンボード
+          </h2>
+          <p style="font-size: 13px; color: var(--text-muted);">
+            ドラッグ＆ドロップでステータス変更・親課題の付け替え・表示順序の調整が可能です
+          </p>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" class="btn btn-secondary btn-sm" @click="expandAllIssues">すべて展開</button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="collapseAllIssues">すべて折りたたむ</button>
+        </div>
+      </div>
+
+      <!-- Scrollable Unified Kanban Container -->
+      <div class="kanban-scroll-wrapper" style="overflow-x: auto; width: 100%; padding-bottom: 12px;">
+        <div :style="{ minWidth: `${Math.max(statuses.length, 1) * 260}px`, display: 'flex', flexDirection: 'column', gap: '14px' }">
+          <!-- Status Column Headers (Sticky Top) -->
+          <div
+            :style="{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${Math.max(statuses.length, 1)}, minmax(240px, 1fr))`,
+              gap: '12px',
+              position: 'sticky',
+              top: '0',
+              zIndex: '10',
+              background: 'var(--bg-main)',
+              paddingBottom: '4px'
+            }"
+          >
+            <div
+              v-for="st in statuses"
+              :key="st.id"
+              class="card"
+              style="padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;"
+            >
+              <span style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                <span :style="{ width: '10px', height: '10px', borderRadius: '999px', backgroundColor: st.color }"></span>
+                {{ st.display_order }}. {{ st.name }}
+              </span>
+              <span style="font-size: 13px; color: var(--text-muted);">
+                {{ countTasksByStatus(st.id) }}件
+              </span>
+            </div>
+          </div>
+
+          <div v-if="issues.length === 0" class="card" style="text-align: center; padding: 40px;">
+            <p style="font-size: 15px; font-weight: 600;">該当する課題がありません</p>
+          </div>
+
+          <!-- Swimlanes per Issue -->
+          <div v-for="iss in issues" :key="iss.id" class="kanban-swimlane">
+            <!-- Issue Rollup Header -->
+            <div class="kanban-swimlane-header">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  style="padding: 2px 6px; font-size: 13px; font-weight: 700;"
+                  :title="collapsedIssueIds.has(iss.id) ? '展開' : '折りたたむ'"
+                  @click="toggleIssueCollapse(iss.id)"
+                >
+                  {{ collapsedIssueIds.has(iss.id) ? '▶' : '▼' }}
+                </button>
+                <span :class="['badge', iss.state === 'open' ? 'badge-green' : 'badge-slate']">
+                  {{ iss.state.toUpperCase() }}
+                </span>
+                <span
+                  style="font-size: 15px; font-weight: 700; cursor: pointer; color: var(--primary);"
+                  @click="openIssueDetail(iss)"
+                >
+                  {{ iss.title }}
+                </span>
+                <span
+                  v-for="lid in iss.label_ids"
+                  :key="lid"
+                  class="badge badge-slate"
+                  :style="{ color: getLabel(lid)?.color || '#cbd5e1' }"
+                >
+                  ● {{ getLabel(lid)?.name }}
+                </span>
+                <span style="font-size: 13px; color: var(--text-muted);">
+                  オーナー: {{ getUserName(iss.owner_user_id) }}
+                </span>
+              </div>
+
+              <!-- Auto-aggregated Rollup Metrics -->
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 13px;">
+                <div>
+                  <span style="color: var(--text-muted);">自動集計予定:</span>
+                  <strong style="margin-left: 4px;">
+                    {{ iss.rollup.planned_start_date || '-' }} 〜 {{ iss.rollup.planned_end_date || '-' }}
+                  </strong>
+                </div>
+                <div>
+                  <span style="color: var(--text-muted);">工数集計(予/実):</span>
+                  <strong style="margin-left: 4px;">
+                    {{ formatHours(iss.rollup.total_planned_hours) }}h / {{ formatHours(iss.rollup.total_actual_hours) }}h
+                  </strong>
+                </div>
+                <div>
+                  <span style="color: var(--text-muted);">コスト集計(予/実):</span>
+                  <strong style="margin-left: 4px;">
+                    {{ formatCost(iss.rollup.total_planned_cost) }} / {{ formatCost(iss.rollup.total_actual_cost) }}
+                  </strong>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="color: var(--text-muted);">加重平均進捗:</span>
+                  <div style="width: 80px; height: 8px; border-radius: 999px; background: var(--border-color); overflow: hidden;">
+                    <div :style="{ width: `${iss.rollup.weighted_progress}%`, height: '100%', backgroundColor: '#2563eb' }"></div>
+                  </div>
+                  <strong style="color: var(--primary);">{{ iss.rollup.weighted_progress.toFixed(1) }}%</strong>
+                </div>
+                <button
+                  v-if="canEditProjectItems"
+                  class="btn btn-secondary btn-sm"
+                  @click="openNewTaskModal(iss)"
+                >
+                  ＋ 子タスク追加
+                </button>
+              </div>
+            </div>
+
+            <!-- Status Cells for this Issue (Collapsible) -->
+            <div
+              v-if="!collapsedIssueIds.has(iss.id)"
+              :style="{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${Math.max(statuses.length, 1)}, minmax(240px, 1fr))`,
+                gap: '12px',
+                padding: '12px'
+              }"
+            >
+              <div
+                v-for="st in statuses"
+                :key="st.id"
+                class="kanban-cell"
+                :class="{ 'drag-over': dragOverKey === `${iss.id}:${st.id}` }"
+                @dragover.prevent="dragOverKey = `${iss.id}:${st.id}`"
+                @dragleave="dragOverKey = ''"
+                @drop.prevent="onDropTaskCard(iss.id, st.id, getTasksForCell(iss, st.id).length + 1)"
+              >
+                <template
+                  v-for="(t, tIdx) in getTasksForCell(iss, st.id)"
+                  :key="t.id"
+                >
+                  <div v-if="dragOverCardId === t.id && dragOverPosition === 'before'" class="kanban-drop-indicator"></div>
+                  <div
+                    class="kanban-card"
+                    :draggable="canEditProjectItems"
+                    @dragstart="onDragStartTask(t)"
+                    @dragover.prevent.stop="onCardDragOver($event, t.id)"
+                    @dragleave="onCardDragLeave(t.id)"
+                    @drop.prevent.stop="onDropTaskCard(iss.id, st.id, dragOverPosition === 'after' ? tIdx + 2 : tIdx + 1)"
+                    @click="openTaskDetail(t, iss)"
+                  >
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+                      <span style="font-size: 14px; font-weight: 700;">{{ t.title }}</span>
+                      <span class="badge badge-blue">{{ t.progress }}%</span>
+                    </div>
+
+                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">
+                      <div>予定: {{ t.planned_start_date || '-' }}〜{{ t.planned_end_date || '-' }} ({{ formatHours(t.planned_hours) }}h)</div>
+                      <div v-if="t.actual_start_date || t.actual_hours !== null">
+                        実績: {{ t.actual_start_date || '-' }}〜{{ t.actual_end_date || '-' }} ({{ formatHours(t.actual_hours) }}h)
+                      </div>
+                      <div v-if="t.planned_cost !== null && t.planned_cost !== undefined || t.actual_cost !== null && t.actual_cost !== undefined">
+                        コスト(予/実): {{ formatCost(t.planned_cost) }} / {{ formatCost(t.actual_cost) }}
+                      </div>
+                    </div>
+
+                    <div style="width: 100%; height: 5px; border-radius: 999px; background: var(--border-color); overflow: hidden; margin-bottom: 8px;">
+                      <div :style="{ width: `${t.progress}%`, height: '100%', backgroundColor: st.color || '#3b82f6' }"></div>
+                    </div>
+
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px;">
+                      <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        <span
+                          v-for="(a, aIdx) in t.assignees"
+                          :key="aIdx"
+                          class="badge badge-slate"
+                          style="font-size: 11px;"
+                        >
+                          {{ a.type === 'user' ? `👤 ${getUserName(a.id)}` : `👥 ${getGroupName(a.id)}` }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="dragOverCardId === t.id && dragOverPosition === 'after'" class="kanban-drop-indicator"></div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: DUAL-BAR GANTT CHART -->
+    <section v-if="activeTab === 'gantt'" style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+        <div>
+          <h2 style="font-size: 15px; font-weight: 700;">
+            ガントチャート
+          </h2>
+          <p style="font-size: 12px; color: var(--text-muted);">
+            上段: 予定期間 (進捗塗) ／ 下段: 実績期間 (両端リサイズ対応)
+          </p>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" @click="shiftTimeline(-7)">◀ -7日</button>
+          <button class="btn btn-secondary btn-sm" @click="resetTimelineToday">今日へ</button>
+          <button class="btn btn-primary btn-sm" @click="scrollToToday">📍 今日</button>
+          <button class="btn btn-secondary btn-sm" @click="shiftTimeline(7)">+7日 ▶</button>
+
+          <div style="display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border-color);">
+            <button class="btn btn-sm" :class="ganttScale === 'day' ? 'btn-primary' : 'btn-ghost'" @click="ganttScale = 'day'">日</button>
+            <button class="btn btn-sm" :class="ganttScale === 'week' ? 'btn-primary' : 'btn-ghost'" @click="ganttScale = 'week'">週</button>
+            <button class="btn btn-sm" :class="ganttScale === 'month' ? 'btn-primary' : 'btn-ghost'" @click="ganttScale = 'month'">月</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="gantt-container">
+        <!-- Left Tree Pane -->
+        <div class="gantt-left">
+          <div class="gantt-row" style="height: 44px; background: var(--bg-elevated); padding: 0 12px; font-size: 13px; font-weight: 700;">
+            <div style="flex: 1;">課題 / タスク階層</div>
+            <div style="width: 96px; text-align: right;">予定/実績(h)</div>
+            <div style="width: 54px; text-align: right;">進捗</div>
+          </div>
+
+          <template v-for="iss in issues" :key="`g-left-${iss.id}`">
+            <!-- Parent Issue Row -->
+            <div
+              class="gantt-row"
+              style="padding: 0 12px; background: var(--bg-card-hover); cursor: pointer;"
+              @click="openIssueDetail(iss)"
+            >
+              <div style="flex: 1; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--primary);">
+                ▼ {{ iss.title }}
+              </div>
+              <div style="width: 96px; text-align: right; font-size: 12px; font-weight: 600;">
+                {{ formatHours(iss.rollup.total_planned_hours) }} / {{ formatHours(iss.rollup.total_actual_hours) }}
+              </div>
+              <div style="width: 54px; text-align: right; font-size: 13px; font-weight: 700; color: var(--primary);">
+                {{ iss.rollup.weighted_progress.toFixed(0) }}%
+              </div>
+            </div>
+
+            <!-- Child Task Rows -->
+            <div
+              v-for="t in iss.tasks || []"
+              :key="`g-left-t-${t.id}`"
+              class="gantt-row"
+              style="padding: 0 12px 0 24px; cursor: pointer;"
+              @click="openTaskDetail(t, iss)"
+            >
+              <div style="flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center;">
+                <span>├ {{ t.title }}</span>
+                <span v-if="isTaskOverdue(t)" class="badge badge-amber" style="font-size: 11px; margin-left: 6px; color: #dc2626; border-color: #dc2626; font-weight: 700;">⚠️ 遅延</span>
+              </div>
+              <div style="width: 96px; text-align: right; font-size: 12px; color: var(--text-muted);">
+                {{ formatHours(t.planned_hours) }} / {{ formatHours(t.actual_hours) }}
+              </div>
+              <div style="width: 54px; text-align: right; font-size: 13px; font-weight: 600;">
+                {{ t.progress }}%
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Right Timeline Pane -->
+        <div ref="timelinePaneRef" class="gantt-right">
+          <div :style="{ width: `${timelineDays.length * ganttDayWidth}px`, minWidth: '100%', position: 'relative' }">
+            <!-- Today Indicator Line -->
+            <div
+              v-if="getBarPos(todayYMD, todayYMD).visible"
+              :style="{
+                position: 'absolute',
+                top: '0',
+                bottom: '0',
+                left: `${getBarPos(todayYMD, todayYMD).leftPx + (ganttDayWidth / 2)}px`,
+                width: '2px',
+                backgroundColor: '#ef4444',
+                zIndex: 10,
+                pointerEvents: 'none'
+              }"
+              title="今日 (Today)"
+            >
+              <div
+                style="
+                  position: absolute;
+                  top: 2px;
+                  left: 50%;
+                  transform: translateX(-50%);
+                  background: #ef4444;
+                  color: #fff;
+                  font-size: 10px;
+                  font-weight: 700;
+                  padding: 1px 4px;
+                  border-radius: 4px;
+                  white-space: nowrap;
+                "
+              >
+                今日
+              </div>
+            </div>
+
+            <!-- 2-Tier Date Header -->
+            <div class="gantt-row" style="height: 44px; background: var(--bg-elevated); display: flex; flex-direction: column; padding: 0;">
+              <!-- Upper Tier: Month / Year -->
+              <div style="display: flex; height: 22px; border-bottom: 1px solid var(--border-color);">
+                <div
+                  v-for="(mg, mIdx) in ganttMonthGroups"
+                  :key="mIdx"
+                  :style="{
+                    width: `${mg.widthPx}px`,
+                    height: '100%',
+                    borderRight: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    color: 'var(--text-main)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }"
+                >
+                  {{ mg.label }}
+                </div>
+              </div>
+              <!-- Lower Tier: Day and Weekday -->
+              <div style="display: flex; height: 22px;">
+                <div
+                  v-for="ymd in timelineDays"
+                  :key="ymd"
+                  :style="{
+                    width: `${ganttDayWidth}px`,
+                    height: '100%',
+                    borderRight: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '10px',
+                    background: isWeekend(ymd) ? 'rgba(100, 116, 139, 0.08)' : 'transparent',
+                    color: ymd === todayYMD ? 'var(--primary)' : isWeekend(ymd) ? 'var(--text-muted)' : 'var(--text-main)',
+                    fontWeight: ymd === todayYMD ? '700' : '400'
+                  }"
+                >
+                  {{ ymd.slice(8) }} ({{ ['日', '月', '火', '水', '木', '金', '土'][new Date(ymd).getDay()] }})
+                </div>
+              </div>
+            </div>
+
+            <template v-for="iss in issues" :key="`g-right-${iss.id}`">
+              <!-- Parent Issue Rollup Bar Row -->
+              <div class="gantt-row" style="position: relative; background: var(--bg-card-hover);">
+                <div
+                  v-if="getBarPos(iss.rollup.planned_start_date, iss.rollup.planned_end_date).visible"
+                  class="gantt-bar-planned"
+                  :style="{
+                    left: `${getBarPos(iss.rollup.planned_start_date, iss.rollup.planned_end_date).leftPx}px`,
+                    width: `${getBarPos(iss.rollup.planned_start_date, iss.rollup.planned_end_date).widthPx}px`,
+                    cursor: 'default'
+                  }"
+                >
+                  <div class="gantt-bar-planned-progress" :style="{ width: `${iss.rollup.weighted_progress}%` }"></div>
+                </div>
+                <div
+                  v-if="getBarPos(iss.rollup.actual_start_date, iss.rollup.actual_end_date).visible"
+                  class="gantt-bar-actual"
+                  :style="{
+                    left: `${getBarPos(iss.rollup.actual_start_date, iss.rollup.actual_end_date).leftPx}px`,
+                    width: `${getBarPos(iss.rollup.actual_start_date, iss.rollup.actual_end_date).widthPx}px`,
+                    cursor: 'default'
+                  }"
+                ></div>
+              </div>
+
+              <!-- Child Task Timeline Row -->
+              <div
+                v-for="t in iss.tasks || []"
+                :key="`g-right-t-${t.id}`"
+                class="gantt-row"
+                style="position: relative;"
+              >
+                <!-- Background Date Cells (supports drag-to-create when dates unset) -->
+                <div
+                  v-for="ymd in timelineDays"
+                  :key="`cell-${t.id}-${ymd}`"
+                  :style="{
+                    width: `${ganttDayWidth}px`,
+                    height: '100%',
+                    borderRight: '1px solid var(--border-color)',
+                    background: isWeekend(ymd) ? 'rgba(100, 116, 139, 0.04)' : 'transparent',
+                    cursor: !t.planned_start_date ? 'crosshair' : 'default'
+                  }"
+                  :title="!t.planned_start_date ? `${ymd} を起点にドラッグして予定期間を作成` : ymd"
+                  @mousedown="onCellMouseDownCreate(t, ymd)"
+                  @mouseup="onCellMouseUpCreate(t, ymd)"
+                ></div>
+
+                <!-- Planned Bar (Upper, Draggable & Resizable) -->
+                <div
+                  v-if="getBarPos(t.planned_start_date, t.planned_end_date).visible"
+                  class="gantt-bar-planned"
+                  :class="{ 'task-overdue': isTaskOverdue(t) }"
+                  :style="{
+                    left: `${getBarPos(t.planned_start_date, t.planned_end_date).leftPx}px`,
+                    width: `${getBarPos(t.planned_start_date, t.planned_end_date).widthPx}px`
+                  }"
+                  @mousedown.stop="startGanttBarDrag($event, t, 'planned', 'move')"
+                  @click.stop="onGanttBarClick(t, iss)"
+                >
+                  <div v-if="canEditProjectItems" class="gantt-resize-handle" @mousedown.stop="startGanttBarDrag($event, t, 'planned', 'resize-start')"></div>
+                  <div class="gantt-bar-planned-progress" :style="{ width: `${t.progress}%` }"></div>
+                  <span style="position: relative; z-index: 2; font-size: 11px; font-weight: 700; padding: 0 4px; white-space: nowrap;">
+                    予定 {{ t.planned_start_date?.slice(5) }}〜{{ t.planned_end_date?.slice(5) }}
+                  </span>
+                  <div v-if="canEditProjectItems" style="margin-left: auto;" class="gantt-resize-handle" @mousedown.stop="startGanttBarDrag($event, t, 'planned', 'resize-end')"></div>
+                </div>
+
+                <!-- Actual Bar (Lower, Draggable & Resizable) -->
+                <div
+                  v-if="getBarPos(t.actual_start_date, t.actual_end_date).visible"
+                  class="gantt-bar-actual"
+                  :style="{
+                    left: `${getBarPos(t.actual_start_date, t.actual_end_date).leftPx}px`,
+                    width: `${getBarPos(t.actual_start_date, t.actual_end_date).widthPx}px`
+                  }"
+                  @mousedown.stop="startGanttBarDrag($event, t, 'actual', 'move')"
+                  @click.stop="onGanttBarClick(t, iss)"
+                >
+                  <div v-if="canEditProjectItems" class="gantt-resize-handle" @mousedown.stop="startGanttBarDrag($event, t, 'actual', 'resize-start')"></div>
+                  <span style="position: relative; z-index: 2; font-size: 11px; color: #fff; padding: 0 4px; white-space: nowrap;">
+                    実績 {{ t.actual_start_date?.slice(5) }}〜{{ t.actual_end_date?.slice(5) }}
+                  </span>
+                  <div v-if="canEditProjectItems" style="margin-left: auto;" class="gantt-resize-handle" @mousedown.stop="startGanttBarDrag($event, t, 'actual', 'resize-end')"></div>
+                </div>
+                <button
+                  v-else-if="canEditProjectItems && t.planned_start_date"
+                  class="btn btn-ghost btn-sm"
+                  style="position: absolute; top: 31px; left: 8px; padding: 1px 6px; font-size: 11px; color: var(--success); border: 1px dashed var(--success);"
+                  @click.stop="initActualFromPlanned(t)"
+                >
+                  ＋ 実績バー作成
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: HIERARCHY LIST -->
+    <section v-if="activeTab === 'list'" class="card" style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="font-size: 15px; font-weight: 700;">課題 ＞ タスク 階層一覧</h2>
+      <div v-for="iss in issues" :key="`list-${iss.id}`" style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+        <div
+          style="padding: 10px 14px; background: var(--bg-card-hover); display: flex; justify-content: space-between; align-items: center; cursor: pointer;"
+          @click="openIssueDetail(iss)"
+        >
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span :class="['badge', iss.state === 'open' ? 'badge-green' : 'badge-slate']">{{ iss.state.toUpperCase() }}</span>
+            <strong style="color: var(--primary);">{{ iss.title }}</strong>
+          </div>
+          <div style="font-size: 12px; color: var(--text-muted);">
+            予定: {{ formatHours(iss.rollup.total_planned_hours) }}h / 実績: {{ formatHours(iss.rollup.total_actual_hours) }}h ・ コスト(予/実): {{ formatCost(iss.rollup.total_planned_cost) }} / {{ formatCost(iss.rollup.total_actual_cost) }} ・ 進捗: {{ iss.rollup.weighted_progress.toFixed(1) }}%
+          </div>
+        </div>
+        <div
+          v-for="t in iss.tasks || []"
+          :key="`list-t-${t.id}`"
+          style="padding: 8px 14px 8px 28px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px; cursor: pointer;"
+          @click="openTaskDetail(t, iss)"
+        >
+          <span>├ {{ t.title }}</span>
+          <div style="display: flex; align-items: center; gap: 12px; color: var(--text-muted);">
+            <span>{{ getStatusName(t.status_id) }}</span>
+            <span>予: {{ formatHours(t.planned_hours) }}h / 実: {{ formatHours(t.actual_hours) }}h</span>
+            <span>コスト(予/実): {{ formatCost(t.planned_cost) }} / {{ formatCost(t.actual_cost) }}</span>
+            <span class="badge badge-blue">{{ t.progress }}%</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: PROJECT SETTINGS & TEMPLATE BUILDER (Admin Role) -->
+    <section v-if="activeTab === 'settings' && project" style="display: flex; flex-direction: column; gap: 20px;">
+      <!-- 1. Project General Settings -->
+      <div class="card">
+        <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">プロジェクト基本設定</h3>
+        <form style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; align-items: end;" @submit.prevent="saveProjectSettings">
+          <div>
+            <label class="field-label">プロジェクト名 *</label>
+            <input v-model="projForm.name" type="text" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">説明</label>
+            <input v-model="projForm.description" type="text" style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">1日あたりの基準時間 (h)</label>
+            <input v-model.number="projForm.hours_per_day" type="number" min="1" max="24" step="0.01" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">デフォルト課題テンプレート</label>
+            <select v-model="projForm.default_issue_template_id" style="width: 100%;">
+              <option v-for="t in templates.filter(x => x.target_type === 'issue')" :key="t.id" :value="t.id">{{ t.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">デフォルトタスクテンプレート</label>
+            <select v-model="projForm.default_task_template_id" style="width: 100%;">
+              <option v-for="t in templates.filter(x => x.target_type === 'task')" :key="t.id" :value="t.id">{{ t.name }}</option>
+            </select>
+          </div>
+          <div>
+            <button type="submit" class="btn btn-primary">基本設定を保存</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- 2. Project Members & Roles + Project Groups -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px;">
+        <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+          <h3 style="font-size: 15px; font-weight: 700;">参加メンバー・グループ</h3>
+          <form style="display: flex; gap: 8px; flex-wrap: wrap;" @submit.prevent="addProjectMember">
+            <select v-model="memberForm.subject_combined" required style="flex: 1;">
+              <option value="">-- ユーザーまたはグループを選択 --</option>
+              <optgroup label="ユーザー">
+                <option v-for="u in users" :key="u.id" :value="`user:${u.id}`">👤 {{ u.display_name }} ({{ u.email }})</option>
+              </optgroup>
+              <optgroup label="グループ">
+                <option v-for="g in allGroups" :key="g.id" :value="`group:${g.id}`">👥 {{ g.name }}</option>
+              </optgroup>
+            </select>
+            <select v-model="memberForm.role">
+              <option value="admin">Admin (管理者)</option>
+              <option value="editor">Editor (編集者)</option>
+              <option value="viewer">Viewer (閲覧者)</option>
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">追加/更新</button>
+          </form>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div
+              v-for="m in members"
+              :key="m.id"
+              style="padding: 8px 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
+            >
+              <span>
+                {{ m.subject_type === 'user' ? `👤 ${getUserName(m.subject_id)}` : `👥 ${getGroupName(m.subject_id)}` }}
+              </span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="badge badge-blue">{{ m.role.toUpperCase() }}</span>
+                <button class="btn btn-danger btn-sm" @click="removeProjectMember(m.id)">解除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Project Statuses (1..10, migration on delete) -->
+        <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+          <h3 style="font-size: 15px; font-weight: 700;">ステータス設定</h3>
+          <form style="display: flex; gap: 8px; flex-wrap: wrap;" @submit.prevent="createStatus">
+            <input v-model.number="statusForm.display_order" type="number" min="1" max="10" required style="width: 70px;" placeholder="順序" />
+            <input v-model="statusForm.name" type="text" required style="flex: 1;" placeholder="ステータス名" />
+            <input v-model="statusForm.color" type="color" style="width: 44px; padding: 2px;" />
+            <button type="submit" class="btn btn-primary btn-sm" :disabled="statuses.length >= 10">＋ 追加</button>
+          </form>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div
+              v-for="st in statuses"
+              :key="st.id"
+              style="padding: 8px 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
+            >
+              <span style="display: flex; align-items: center; gap: 8px; font-weight: 600;">
+                <span :style="{ width: '10px', height: '10px', borderRadius: '999px', backgroundColor: st.color }"></span>
+                {{ st.display_order }}. {{ st.name }}
+              </span>
+              <div v-if="statuses.length > 1" style="display: flex; align-items: center; gap: 6px;">
+                <select v-model="migrateTargetMap[st.id]" style="font-size: 11px; padding: 2px 6px;">
+                  <option value="">移行先ステータス...</option>
+                  <option v-for="other in statuses.filter(x => x.id !== st.id)" :key="other.id" :value="other.id">
+                    → {{ other.display_order }}. {{ other.name }}
+                  </option>
+                </select>
+                <button class="btn btn-danger btn-sm" @click="deleteStatus(st.id)">削除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Project Labels & Custom Field Definitions -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px;">
+        <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+          <h3 style="font-size: 15px; font-weight: 700;">プロジェクト固有ラベル</h3>
+          <form style="display: flex; gap: 8px;" @submit.prevent="createProjectLabel">
+            <input v-model="labelForm.name" type="text" required style="flex: 1;" placeholder="ラベル名" />
+            <input v-model="labelForm.color" type="color" style="width: 44px; padding: 2px;" />
+            <button type="submit" class="btn btn-primary btn-sm">＋ 追加</button>
+          </form>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <div
+              v-for="lb in projectLabels"
+              :key="lb.id"
+              style="padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-input); display: flex; align-items: center; gap: 8px; font-size: 12px;"
+            >
+              <span :style="{ color: lb.color, fontWeight: 700 }">● {{ lb.name }}</span>
+              <button class="btn btn-danger btn-sm" style="padding: 1px 5px; font-size: 10px;" @click="deleteProjectLabel(lb.id)">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+          <h3 style="font-size: 15px; font-weight: 700;">カスタム属性定義</h3>
+          <form style="display: flex; flex-wrap: wrap; gap: 8px;" @submit.prevent="createCustomField">
+            <select v-model="cfForm.target_type">
+              <option value="issue">課題用</option>
+              <option value="task">タスク用</option>
+            </select>
+            <input v-model="cfForm.name" type="text" required style="flex: 1;" placeholder="項目名（例: 外注見積金額）" />
+            <select v-model="cfForm.field_type">
+              <option value="text_single">1行テキスト</option>
+              <option value="text_multi">複数行テキスト</option>
+              <option value="markdown">Markdown</option>
+              <option value="number">数値</option>
+              <option value="date">日付</option>
+              <option value="select">プルダウン</option>
+              <option value="radio">ラジオボタン</option>
+              <option value="checkbox">チェックボックス</option>
+              <option value="user_group">ユーザー/グループ</option>
+            </select>
+            <input
+              v-if="['select', 'radio', 'checkbox'].includes(cfForm.field_type)"
+              v-model="cfForm.options_csv"
+              type="text"
+              style="width: 100%;"
+              placeholder="選択肢（カンマ区切り: A, B, C）"
+            />
+            <button type="submit" class="btn btn-primary btn-sm">＋ 追加</button>
+          </form>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div
+              v-for="cf in customFields"
+              :key="cf.id"
+              style="padding: 6px 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
+            >
+              <span>
+                <span :class="['badge', cf.target_type === 'issue' ? 'badge-green' : 'badge-blue']" style="margin-right: 6px;">
+                  {{ cf.target_type === 'issue' ? '課題' : 'タスク' }}
+                </span>
+                <strong>{{ cf.name }}</strong> ({{ cf.field_type }})
+              </span>
+              <button class="btn btn-danger btn-sm" @click="deleteCustomField(cf.id)">削除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Template Layout & Field Permission Builder -->
+      <TemplateBuilder
+        title="プロジェクトテンプレート ＆ レイアウトビルダー"
+        :templates="templates"
+        :custom-fields="customFields"
+        :users="users"
+        :groups="allGroups"
+        @save="saveProjectTemplate"
+        @delete="deleteProjectTemplate"
+      />
+
+      <!-- 5. Project Outbound Webhooks -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+          <div>
+            <h3 style="font-size: 15px; font-weight: 700;">プロジェクト Outbound Webhook 連携</h3>
+            <p style="font-size: 12px; color: var(--text-muted);">
+              タスクや課題の作成・更新・ステータス変更イベントを外部URL（Slack, Discord, Teams, 自社サーバー等）へリアルタイム送信します。
+            </p>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="showNewWebhookModal = true">＋ Webhook を追加</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div
+            v-for="wh in projectWebhooks"
+            :key="wh.id"
+            style="padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;"
+          >
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span :class="['badge', wh.is_active ? 'badge-green' : 'badge-slate']">
+                  {{ wh.is_active ? '有効' : '停止中' }}
+                </span>
+                <strong style="font-size: 14px;">{{ wh.name }}</strong>
+                <code style="font-size: 12px;">{{ wh.url }}</code>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                <span style="font-size: 12px; color: var(--text-muted);">購読イベント:</span>
+                <span v-for="ev in wh.events" :key="ev" class="badge badge-blue" style="font-size: 11px;">
+                  {{ ev }}
+                </span>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" style="font-size: 12px;" @click="openEditWebhook(wh)">編集</button>
+              <button class="btn btn-secondary btn-sm" style="font-size: 12px;" @click="testProjectWebhook(wh.id)">テスト送信 (Ping)</button>
+              <button class="btn btn-secondary btn-sm" style="font-size: 12px;" @click="openWebhookDeliveries(wh)">送信ログ</button>
+              <button class="btn btn-danger btn-sm" style="font-size: 12px;" @click="deleteProjectWebhook(wh.id)">削除</button>
+            </div>
+          </div>
+          <div v-if="projectWebhooks.length === 0" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">
+            登録されたWebhookはありません
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- New Issue Modal (with create_initial_task toggle) -->
+    <div v-if="showNewIssueModal" class="modal-backdrop" @click.self="showNewIssueModal = false">
+      <div class="modal-panel" style="max-width: 520px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規課題（Issue）作成</h3>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitNewIssue">
+          <div>
+            <label class="field-label">課題タイトル *</label>
+            <input v-model="newIssueForm.title" type="text" required style="width: 100%;" placeholder="例: 認証・招待・ドメイン制限基盤の構築" />
+          </div>
+          <div>
+            <label class="field-label">説明 (Markdown)</label>
+            <textarea v-model="newIssueForm.description" rows="3" style="width: 100%;"></textarea>
+          </div>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer; padding: 8px 10px; border-radius: 8px; background: rgba(37,99,235,0.12); border: 1px solid rgba(59,130,246,0.4);">
+            <input v-model="newIssueForm.create_initial_task" type="checkbox" />
+            <span>同名の初期タスクを同時に1つ作成する（最も若いステータス列へ自動配置）</span>
+          </label>
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-secondary" @click="showNewIssueModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary">作成する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- New Task Modal -->
+    <div v-if="showNewTaskModal" class="modal-backdrop" @click.self="showNewTaskModal = false">
+      <div class="modal-panel" style="max-width: 560px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">
+          新規子タスク作成（親課題: {{ newTaskParentIssue?.title }}）
+        </h3>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitNewTask">
+          <div>
+            <label class="field-label">タスクタイトル *</label>
+            <input v-model="newTaskForm.title" type="text" required style="width: 100%;" />
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label class="field-label">予定開始日</label>
+              <input v-model="newTaskForm.planned_start_date" type="date" style="width: 100%;" />
+            </div>
+            <div>
+              <label class="field-label">予定終了日</label>
+              <input v-model="newTaskForm.planned_end_date" type="date" style="width: 100%;" />
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+            <div>
+              <label class="field-label">予定工数 (h)</label>
+              <input v-model="newTaskForm.planned_hours" type="number" min="0" step="0.01" style="width: 100%;" placeholder="0.00" />
+            </div>
+            <div>
+              <label class="field-label">実績工数 (h)</label>
+              <input v-model="newTaskForm.actual_hours" type="number" min="0" step="0.01" style="width: 100%;" placeholder="0.00" />
+            </div>
+            <div>
+              <label class="field-label">初期進捗率 (0〜100%)</label>
+              <input v-model.number="newTaskForm.progress" type="number" min="0" max="100" style="width: 100%;" />
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label class="field-label">予定コスト (小数第2位まで)</label>
+              <input v-model="newTaskForm.planned_cost" type="number" min="0" step="0.01" style="width: 100%;" placeholder="0.00" />
+            </div>
+            <div>
+              <label class="field-label">実績コスト (小数第2位まで)</label>
+              <input v-model="newTaskForm.actual_cost" type="number" min="0" step="0.01" style="width: 100%;" placeholder="0.00" />
+            </div>
+          </div>
+          <div>
+            <label class="field-label">説明 (Markdown)</label>
+            <textarea v-model="newTaskForm.description" rows="2" style="width: 100%;"></textarea>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-secondary" @click="showNewTaskModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary">タスクを作成</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- New Webhook Modal -->
+    <div v-if="showNewWebhookModal" class="modal-backdrop" @click.self="showNewWebhookModal = false">
+      <div class="modal-panel" style="max-width: 520px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規 Webhook の登録</h3>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createProjectWebhook">
+          <div>
+            <label class="field-label">Webhook 名 *</label>
+            <input v-model="newWebhookForm.name" type="text" required style="width: 100%;" placeholder="例: Slack #dev-notify" />
+          </div>
+          <div>
+            <label class="field-label">送信先 URL (HTTP/HTTPS) *</label>
+            <input v-model="newWebhookForm.url" type="url" required style="width: 100%;" placeholder="https://hooks.slack.com/services/..." />
+          </div>
+          <div>
+            <label class="field-label">シークレット鍵 (HMAC-SHA256署名用・空欄なら自動生成)</label>
+            <input v-model="newWebhookForm.secret" type="text" style="width: 100%; font-family: monospace;" placeholder="whsec_..." />
+          </div>
+          <div>
+            <label class="field-label">購読イベント</label>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; font-size: 12px;">
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="task.created" />
+                <span>task.created (タスク作成)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="task.updated" />
+                <span>task.updated (タスク更新)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="task.status_changed" />
+                <span>task.status_changed (タスク状態変更)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="issue.created" />
+                <span>issue.created (課題作成)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="issue.state_changed" />
+                <span>issue.state_changed (課題状態変更)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="comment.created" />
+                <span>comment.created (コメント投稿)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="newWebhookForm.events" type="checkbox" value="attachment.created" />
+                <span>attachment.created (添付ファイル追加)</span>
+              </label>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+            <button type="button" class="btn btn-secondary" @click="showNewWebhookModal = false">キャンセル</button>
+            <button type="submit" class="btn btn-primary">作成する</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Webhook Deliveries Modal -->
+    <div v-if="selectedWebhookForLogs" class="modal-backdrop" @click.self="selectedWebhookForLogs = null">
+      <div class="modal-panel" style="max-width: 680px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <h3 style="font-size: 15px; font-weight: 700;">配信ログ: {{ selectedWebhookForLogs.name }}</h3>
+          <button class="btn btn-secondary btn-sm" @click="selectedWebhookForLogs = null">閉じる</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto;">
+          <div
+            v-for="log in webhookDeliveries"
+            :key="log.id"
+            style="padding: 10px 12px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); font-size: 12px; display: flex; flex-direction: column; gap: 8px; cursor: pointer;"
+            @click="expandedDeliveryId = expandedDeliveryId === log.id ? null : log.id"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span :class="['badge', log.status_code && log.status_code >= 200 && log.status_code < 300 ? 'badge-green' : 'badge-red']" style="margin-right: 6px;">
+                  {{ log.status_code || 'ERR' }}
+                </span>
+                <strong>{{ log.event }}</strong>
+                <span style="color: var(--text-muted); margin-left: 6px;">({{ log.duration_ms }}ms)</span>
+                <span style="color: var(--primary); margin-left: 8px; font-size: 11px;">
+                  {{ expandedDeliveryId === log.id ? '▲ 閉じる' : '▼ 詳細' }}
+                </span>
+                <div v-if="log.error_message" style="color: var(--danger); font-size: 11px; margin-top: 2px;">
+                  {{ log.error_message }}
+                </div>
+              </div>
+              <span style="font-size: 11px; color: var(--text-muted);">{{ log.created_at.slice(0, 19).replace('T', ' ') }}</span>
+            </div>
+
+            <!-- Accordion Details (Request & Response) -->
+            <div v-if="expandedDeliveryId === log.id" style="border-top: 1px dashed var(--border-color); padding-top: 8px; display: flex; flex-direction: column; gap: 6px;" @click.stop>
+              <div>
+                <strong style="color: var(--text-muted); font-size: 11px;">リクエスト本文 (JSON):</strong>
+                <pre style="margin-top: 4px; padding: 6px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 4px; font-family: monospace; font-size: 11px; max-height: 160px; overflow: auto;">{{ JSON.stringify(log.request_body, null, 2) }}</pre>
+              </div>
+              <div v-if="log.response_body">
+                <strong style="color: var(--text-muted); font-size: 11px;">レスポンス本文:</strong>
+                <pre style="margin-top: 4px; padding: 6px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 4px; font-family: monospace; font-size: 11px; max-height: 120px; overflow: auto;">{{ log.response_body }}</pre>
+              </div>
+            </div>
+          </div>
+          <div v-if="webhookDeliveries.length === 0" style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px;">
+            配信履歴はありません
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Webhook Modal -->
+    <div v-if="editingWebhook" class="modal-backdrop" @click.self="editingWebhook = null">
+      <div class="modal-panel" style="max-width: 520px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Webhook の編集</h3>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="updateProjectWebhook">
+          <div>
+            <label class="field-label">Webhook 名 *</label>
+            <input v-model="editingWebhookForm.name" type="text" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">送信先 URL (HTTP/HTTPS) *</label>
+            <input v-model="editingWebhookForm.url" type="url" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">シークレット鍵 (空欄のままなら変更なし)</label>
+            <input v-model="editingWebhookForm.secret" type="text" style="width: 100%; font-family: monospace;" placeholder="更新時のみ入力" />
+          </div>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+            <input v-model="editingWebhookForm.is_active" type="checkbox" />
+            <span>有効にする</span>
+          </label>
+          <div>
+            <label class="field-label">購読イベント</label>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; font-size: 12px;">
+              <label v-for="ev in ['task.created', 'task.updated', 'task.status_changed', 'issue.created', 'issue.state_changed', 'comment.created', 'attachment.created']" :key="ev" style="display: flex; align-items: center; gap: 4px;">
+                <input v-model="editingWebhookForm.events" type="checkbox" :value="ev" />
+                <span>{{ ev }}</span>
+              </label>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+            <button type="button" class="btn btn-secondary" @click="editingWebhook = null">キャンセル</button>
+            <button type="submit" class="btn btn-primary">更新を保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import type {
+  CustomFieldDefinition,
+  Group,
+  Issue,
+  Label,
+  Project,
+  ProjectMember,
+  Status,
+  TargetType,
+  Task,
+  Template,
+  TemplateRow,
+  User,
+  Webhook,
+  WebhookDelivery
+} from '~/types/polaris'
+import { addDaysYMD, calcGanttBarPosition, formatCost, formatHours, generateDateRangeYMD, hasAtMostTwoDecimals } from '~/utils/format'
+
+const route = useRoute()
+const router = useRouter()
+const { apiFetch, notifyToast, refreshProjects } = useApi()
+
+const projectId = computed(() => route.params.id as string)
+const activeTab = ref<'kanban' | 'gantt' | 'list' | 'settings'>('kanban')
+
+const project = ref<Project | null>(null)
+const statuses = ref<Status[]>([])
+const projectLabels = ref<Label[]>([])
+const systemLabels = ref<Label[]>([])
+const customFields = ref<CustomFieldDefinition[]>([])
+const templates = ref<Template[]>([])
+const members = ref<ProjectMember[]>([])
+const projectGroups = ref<Group[]>([])
+const globalGroups = ref<Group[]>([])
+const users = ref<User[]>([])
+const issues = ref<Issue[]>([])
+
+const canEditProjectItems = computed(() => {
+  return project.value?.current_user_role === 'admin' || project.value?.current_user_role === 'editor'
+})
+
+const allLabels = computed(() => [...systemLabels.value, ...projectLabels.value])
+const allGroups = computed(() => {
+  const map = new Map<string, Group>()
+  for (const g of globalGroups.value) {
+    map.set(g.id, g)
+  }
+  for (const g of projectGroups.value) {
+    map.set(g.id, g)
+  }
+  return Array.from(map.values())
+})
+
+const filters = reactive({
+  issue_state: 'open',
+  status_id: '',
+  assignee_id: '',
+  keyword: '',
+  label_ids: [] as string[]
+})
+
+// Kanban State
+const draggingTask = ref<Task | null>(null)
+const dragOverKey = ref('')
+const dragOverCardId = ref<string | null>(null)
+const dragOverPosition = ref<'before' | 'after'>('before')
+const collapsedIssueIds = ref<Set<string>>(new Set())
+
+function toggleIssueCollapse(id: string) {
+  if (collapsedIssueIds.value.has(id)) {
+    collapsedIssueIds.value.delete(id)
+  } else {
+    collapsedIssueIds.value.add(id)
+  }
+  collapsedIssueIds.value = new Set(collapsedIssueIds.value)
+}
+
+function expandAllIssues() {
+  collapsedIssueIds.value = new Set()
+}
+
+function collapseAllIssues() {
+  collapsedIssueIds.value = new Set(issues.value.map(i => i.id))
+}
+
+function onCardDragOver(e: DragEvent, cardId: string) {
+  dragOverCardId.value = cardId
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const offsetY = e.clientY - rect.top
+  dragOverPosition.value = offsetY > rect.height / 2 ? 'after' : 'before'
+}
+
+function onCardDragLeave(cardId: string) {
+  if (dragOverCardId.value === cardId) {
+    dragOverCardId.value = null
+  }
+}
+
+// Gantt State
+const timelinePaneRef = ref<HTMLElement | null>(null)
+const timelinePaneWidth = ref(0)
+let timelineResizeObserver: ResizeObserver | null = null
+
+const ganttScale = ref<'day' | 'week' | 'month'>('day')
+const baseDayWidth = computed(() => {
+  if (ganttScale.value === 'day') return 48
+  if (ganttScale.value === 'week') return 28
+  return 36 // Expanded month cell width (formerly 14)
+})
+
+const ganttDayWidth = computed(() => {
+  const count = timelineDays.value.length
+  if (!count) return baseDayWidth.value
+  const minTotal = count * baseDayWidth.value
+  if (timelinePaneWidth.value > minTotal) {
+    return timelinePaneWidth.value / count
+  }
+  return baseDayWidth.value
+})
+const todayYMD = new Date().toISOString().slice(0, 10)
+const timelineStartYMD = ref(addDaysYMD(todayYMD, -5))
+const timelineDays = computed(() => {
+  const count = ganttScale.value === 'day' ? 28 : ganttScale.value === 'week' ? 45 : 60
+  return generateDateRangeYMD(timelineStartYMD.value, count)
+})
+const createDragStartYMD = ref<string | null>(null)
+
+const ganttMonthGroups = computed(() => {
+  const groups: { label: string; count: number; widthPx: number }[] = []
+  for (const ymd of timelineDays.value) {
+    const ym = ymd.slice(0, 7)
+    const [year, month] = ym.split('-')
+    const label = `${year}年 ${parseInt(month, 10)}月`
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) {
+      last.count++
+      last.widthPx += ganttDayWidth.value
+    } else {
+      groups.push({ label, count: 1, widthPx: ganttDayWidth.value })
+    }
+  }
+  return groups
+})
+
+function isWeekend(ymd: string): boolean {
+  const d = new Date(ymd).getDay()
+  return d === 0 || d === 6
+}
+
+function scrollToToday() {
+  if (!timelinePaneRef.value) return
+  const pos = getBarPos(todayYMD, todayYMD)
+  if (pos.visible) {
+    const paneWidth = timelinePaneRef.value.clientWidth
+    timelinePaneRef.value.scrollTo({
+      left: Math.max(0, pos.leftPx - paneWidth / 2 + ganttDayWidth.value / 2),
+      behavior: 'smooth'
+    })
+  } else {
+    resetTimelineToday()
+  }
+}
+
+function isTaskOverdue(t: Task): boolean {
+  if (!t.planned_end_date) return false
+  if (t.progress >= 100) return false
+  const st = statuses.value.find(s => s.id === t.status_id)
+  if (st && (st.name.includes('完了') || st.name.toLowerCase().includes('done') || st.name.toLowerCase().includes('close'))) {
+    return false
+  }
+  return t.planned_end_date < todayYMD
+}
+
+// Modals
+const showNewIssueModal = ref(false)
+const newIssueForm = reactive({
+  title: '',
+  description: '',
+  create_initial_task: true
+})
+
+const showNewTaskModal = ref(false)
+const newTaskParentIssue = ref<Issue | null>(null)
+const newTaskForm = reactive({
+  title: '',
+  description: '',
+  planned_start_date: '',
+  planned_end_date: '',
+  planned_hours: '' as string | number,
+  actual_hours: '' as string | number,
+  planned_cost: '' as string | number,
+  actual_cost: '' as string | number,
+  progress: 0
+})
+const wasDragging = ref(false)
+
+const detailModalState = reactive({
+  open: false,
+  targetType: 'issue' as TargetType,
+  issue: null as Issue | null,
+  task: null as Task | null,
+  parentIssueTitle: ''
+})
+
+// Settings Forms
+const projForm = reactive({
+  name: '',
+  description: '',
+  hours_per_day: 8.0,
+  default_issue_template_id: '' as string | null,
+  default_task_template_id: '' as string | null
+})
+
+const memberForm = reactive({
+  subject_combined: '',
+  role: 'editor'
+})
+
+const statusForm = reactive({
+  display_order: 5,
+  name: '',
+  color: '#3b82f6'
+})
+const migrateTargetMap = reactive<Record<string, string>>({})
+
+const labelForm = reactive({
+  name: '',
+  color: '#3b82f6'
+})
+
+const cfForm = reactive({
+  target_type: 'task' as TargetType,
+  name: '',
+  field_type: 'text_single',
+  options_csv: ''
+})
+
+function updateTimelinePaneWidth() {
+  if (timelinePaneRef.value) {
+    timelinePaneWidth.value = timelinePaneRef.value.clientWidth
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'gantt') {
+    nextTick(() => {
+      updateTimelinePaneWidth()
+      if (timelinePaneRef.value && !timelineResizeObserver) {
+        timelineResizeObserver = new ResizeObserver(entries => {
+          for (const entry of entries) {
+            timelinePaneWidth.value = entry.contentRect.width
+          }
+        })
+        timelineResizeObserver.observe(timelinePaneRef.value)
+      }
+    })
+  }
+})
+
+onMounted(async () => {
+  await loadWorkspace()
+  nextTick(() => {
+    updateTimelinePaneWidth()
+    if (timelinePaneRef.value) {
+      timelineResizeObserver = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          timelinePaneWidth.value = entry.contentRect.width
+        }
+      })
+      timelineResizeObserver.observe(timelinePaneRef.value)
+    }
+  })
+})
+
+onUnmounted(() => {
+  if (timelineResizeObserver) {
+    timelineResizeObserver.disconnect()
+    timelineResizeObserver = null
+  }
+})
+
+watch(() => route.params.id, async () => {
+  await loadWorkspace()
+})
+
+watch(
+  () => [route.query.item, route.query.openTarget],
+  async ([itemVal, openTargetVal]) => {
+    const raw = itemVal || openTargetVal
+    if (raw) {
+      await openTargetFromQuery(String(raw))
+    } else {
+      detailModalState.open = false
+    }
+  }
+)
+
+async function openTargetFromQuery(raw: string) {
+  const [targetType, targetId] = raw.split(':')
+  if (!targetType || !targetId) return
+  if (targetType === 'issue') {
+    let found = issues.value.find(i => i.id === targetId)
+    if (!found) {
+      try {
+        found = await apiFetch<Issue>(`/projects/${projectId.value}/issues/${targetId}`)
+      } catch (e) {}
+    }
+    if (found) {
+      detailModalState.targetType = 'issue'
+      detailModalState.issue = found
+      detailModalState.task = null
+      detailModalState.parentIssueTitle = ''
+      detailModalState.open = true
+    }
+  } else if (targetType === 'task') {
+    let foundTask: Task | undefined
+    let parentIss: Issue | undefined
+    for (const iss of issues.value) {
+      const found = (iss.tasks || []).find(t => t.id === targetId)
+      if (found) {
+        foundTask = found
+        parentIss = iss
+        break
+      }
+    }
+    if (!foundTask) {
+      try {
+        const fetchedTask = await apiFetch<Task>(`/projects/${projectId.value}/tasks/${targetId}`)
+        if (fetchedTask) {
+          foundTask = fetchedTask
+          if (fetchedTask.issue_id) {
+            parentIss = issues.value.find(i => i.id === fetchedTask.issue_id)
+            if (!parentIss) {
+              try {
+                parentIss = await apiFetch<Issue>(`/projects/${projectId.value}/issues/${fetchedTask.issue_id}`)
+              } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {}
+    } else if (foundTask && !parentIss && foundTask.issue_id) {
+      parentIss = issues.value.find(i => i.id === foundTask.issue_id)
+      if (!parentIss) {
+        try {
+          parentIss = await apiFetch<Issue>(`/projects/${projectId.value}/issues/${foundTask.issue_id}`)
+        } catch (e) {}
+      }
+    }
+    if (foundTask) {
+      detailModalState.targetType = 'task'
+      detailModalState.task = foundTask
+      detailModalState.issue = null
+      detailModalState.parentIssueTitle = parentIss ? parentIss.title : ''
+      detailModalState.open = true
+    }
+  }
+}
+
+async function loadWorkspace() {
+  if (!projectId.value) return
+  try {
+    const [p, sts, pLabels, sLabels, cfs, tpls, mems, pGrps, gGrps, usrs] = await Promise.all([
+      apiFetch<Project>(`/projects/${projectId.value}`),
+      apiFetch<Status[]>(`/projects/${projectId.value}/statuses`),
+      apiFetch<Label[]>(`/projects/${projectId.value}/labels`),
+      apiFetch<Label[]>('/labels'),
+      apiFetch<CustomFieldDefinition[]>(`/projects/${projectId.value}/custom-fields`),
+      apiFetch<Template[]>(`/projects/${projectId.value}/templates`),
+      apiFetch<ProjectMember[]>(`/projects/${projectId.value}/members`),
+      apiFetch<Group[]>(`/projects/${projectId.value}/groups`),
+      apiFetch<Group[]>('/groups'),
+      apiFetch<User[]>('/users')
+    ])
+    project.value = p
+    statuses.value = (sts || []).sort((a, b) => a.display_order - b.display_order)
+    projectLabels.value = pLabels || []
+    systemLabels.value = sLabels || []
+    customFields.value = cfs || []
+    templates.value = tpls || []
+    members.value = mems || []
+    projectGroups.value = pGrps || []
+    globalGroups.value = gGrps || []
+    users.value = usrs || []
+
+    projForm.name = p.name
+    projForm.description = p.description
+    projForm.hours_per_day = p.hours_per_day
+    projForm.default_issue_template_id = p.default_issue_template_id || null
+    projForm.default_task_template_id = p.default_task_template_id || null
+
+    await loadIssues()
+    if (project.value?.current_user_role === 'admin') {
+      await loadProjectWebhooks()
+    }
+    const targetQuery = route.query.item || route.query.openTarget
+    if (targetQuery) {
+      await openTargetFromQuery(String(targetQuery))
+    }
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function loadIssues() {
+  if (!projectId.value) return
+  const params = new URLSearchParams()
+  if (filters.issue_state) params.set('state', filters.issue_state)
+  if (filters.status_id) params.set('status_id', filters.status_id)
+  if (filters.assignee_id) params.set('assignee_id', filters.assignee_id)
+  if (filters.keyword.trim()) params.set('keyword', filters.keyword.trim())
+  if (filters.label_ids.length > 0) params.set('label_ids', filters.label_ids.join(','))
+
+  try {
+    const list = await apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`)
+    issues.value = list || []
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+function toggleFilterLabel(id: string) {
+  const idx = filters.label_ids.indexOf(id)
+  if (idx >= 0) {
+    filters.label_ids.splice(idx, 1)
+  } else {
+    filters.label_ids.push(id)
+  }
+  loadIssues()
+}
+
+function getTasksForCell(iss: Issue, statusId: string): Task[] {
+  return (iss.tasks || [])
+    .filter(t => t.status_id === statusId)
+    .sort((a, b) => a.kanban_order - b.kanban_order)
+}
+
+function countTasksByStatus(statusId: string): number {
+  let count = 0
+  for (const iss of issues.value) {
+    count += (iss.tasks || []).filter(t => t.status_id === statusId).length
+  }
+  return count
+}
+
+function onDragStartTask(t: Task) {
+  if (!canEditProjectItems.value) return
+  draggingTask.value = t
+}
+
+async function onTaskDropKanban(targetIssueId: string, targetStatusId: string, targetIndexOrOrder: number) {
+  dragOverKey.value = ''
+  if (!draggingTask.value || !canEditProjectItems.value) return
+  const t = draggingTask.value
+  draggingTask.value = null
+
+  try {
+    const targetIss = issues.value.find(i => i.id === targetIssueId)
+    const existing = (targetIss ? getTasksForCell(targetIss, targetStatusId) : []).filter(item => item.id !== t.id)
+    const insertIdx = Math.max(0, Math.min(targetIndexOrOrder - 1, existing.length))
+    const reordered = [...existing]
+    reordered.splice(insertIdx, 0, t)
+
+    const updates: Promise<any>[] = []
+    reordered.forEach((taskItem, idx) => {
+      const cleanOrder = idx + 1
+      if (taskItem.id === t.id) {
+        updates.push(
+          apiFetch(`/projects/${projectId.value}/tasks/${t.id}/kanban-move`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              issue_id: targetIssueId,
+              status_id: targetStatusId,
+              kanban_order: cleanOrder
+            })
+          })
+        )
+      } else if (taskItem.kanban_order !== cleanOrder) {
+        taskItem.kanban_order = cleanOrder
+        updates.push(
+          apiFetch(`/projects/${projectId.value}/tasks/${taskItem.id}/kanban-move`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              issue_id: targetIssueId,
+              status_id: targetStatusId,
+              kanban_order: cleanOrder
+            })
+          })
+        )
+      }
+    })
+
+    await Promise.all(updates)
+    await loadIssues()
+    if (project.value?.current_user_role === 'admin') {
+      await loadProjectWebhooks()
+    }
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+const onDropTaskCard = onTaskDropKanban
+
+// Gantt Helpers & Drag/Resize
+function getBarPos(startYMD?: string | null, endYMD?: string | null) {
+  return calcGanttBarPosition(timelineStartYMD.value, startYMD, endYMD, ganttDayWidth.value)
+}
+
+function shiftTimeline(days: number) {
+  timelineStartYMD.value = addDaysYMD(timelineStartYMD.value, days)
+}
+
+function resetTimelineToday() {
+  timelineStartYMD.value = addDaysYMD(todayYMD, -3)
+}
+
+function startGanttBarDrag(
+  ev: MouseEvent,
+  task: Task,
+  barType: 'planned' | 'actual',
+  mode: 'move' | 'resize-start' | 'resize-end'
+) {
+  if (!canEditProjectItems.value) return
+  const startX = ev.clientX
+  const origStart = barType === 'planned' ? task.planned_start_date : task.actual_start_date
+  const origEnd = barType === 'planned' ? task.planned_end_date : task.actual_end_date
+  if (!origStart || !origEnd) return
+
+  const onMouseMove = (moveEv: MouseEvent) => {
+    if (Math.abs(moveEv.clientX - startX) > 3) {
+      wasDragging.value = true
+    }
+    const deltaDays = Math.round((moveEv.clientX - startX) / ganttDayWidth.value)
+    if (deltaDays === 0) return
+    let nextStart = origStart
+    let nextEnd = origEnd
+    if (mode === 'move') {
+      nextStart = addDaysYMD(origStart, deltaDays)
+      nextEnd = addDaysYMD(origEnd, deltaDays)
+    } else if (mode === 'resize-start') {
+      nextStart = addDaysYMD(origStart, deltaDays)
+      if (nextStart > nextEnd) nextStart = nextEnd
+    } else if (mode === 'resize-end') {
+      nextEnd = addDaysYMD(origEnd, deltaDays)
+      if (nextEnd < nextStart) nextEnd = nextStart
+    }
+    if (barType === 'planned') {
+      task.planned_start_date = nextStart
+      task.planned_end_date = nextEnd
+    } else {
+      task.actual_start_date = nextStart
+      task.actual_end_date = nextEnd
+    }
+  }
+
+  const onMouseUp = async () => {
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+    setTimeout(() => {
+      wasDragging.value = false
+    }, 100)
+    try {
+      const payload: Record<string, any> = {}
+      if (barType === 'actual') {
+        payload.actual_start_date = task.actual_start_date
+        payload.actual_end_date = task.actual_end_date
+      } else {
+        payload.planned_start_date = task.planned_start_date
+        payload.planned_end_date = task.planned_end_date
+      }
+      await apiFetch(`/projects/${projectId.value}/tasks/${task.id}/gantt-dates`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload)
+      })
+      await loadIssues()
+    } catch (e: any) {
+      notifyToast(e.message, 'error')
+      await loadIssues()
+    }
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+function onCellMouseDownCreate(task: Task, ymd: string) {
+  if (!canEditProjectItems.value || task.planned_start_date) return
+  createDragStartYMD.value = ymd
+}
+
+async function onCellMouseUpCreate(task: Task, ymd: string) {
+  if (!createDragStartYMD.value || task.planned_start_date) return
+  const s = createDragStartYMD.value <= ymd ? createDragStartYMD.value : ymd
+  const e = createDragStartYMD.value <= ymd ? ymd : createDragStartYMD.value
+  createDragStartYMD.value = null
+  try {
+    await apiFetch(`/projects/${projectId.value}/tasks/${task.id}/gantt-dates`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        planned_start_date: s,
+        planned_end_date: e
+      })
+    })
+    notifyToast(`予定期間 (${s} 〜 ${e}) を作成しました`, 'success')
+    await loadIssues()
+  } catch (err: any) {
+    notifyToast(err.message, 'error')
+  }
+}
+
+async function initActualFromPlanned(task: Task) {
+  const s = task.planned_start_date || todayYMD
+  const e = task.planned_end_date || s
+  try {
+    await apiFetch(`/projects/${projectId.value}/tasks/${task.id}/gantt-dates`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        actual_start_date: s,
+        actual_end_date: e
+      })
+    })
+    await loadIssues()
+  } catch (err: any) {
+    notifyToast(err.message, 'error')
+  }
+}
+
+// Create Issue / Task Modals
+function openNewIssueModal() {
+  newIssueForm.title = ''
+  newIssueForm.description = ''
+  newIssueForm.create_initial_task = true
+  showNewIssueModal.value = true
+}
+
+async function submitNewIssue() {
+  try {
+    await apiFetch(`/projects/${projectId.value}/issues`, {
+      method: 'POST',
+      body: JSON.stringify(newIssueForm)
+    })
+    showNewIssueModal.value = false
+    await loadIssues()
+    if (project.value?.current_user_role === 'admin') {
+      await loadProjectWebhooks()
+    }
+    notifyToast('課題を作成しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+function openNewTaskModal(iss: Issue) {
+  newTaskParentIssue.value = iss
+  newTaskForm.title = ''
+  newTaskForm.description = ''
+  newTaskForm.planned_start_date = ''
+  newTaskForm.planned_end_date = ''
+  newTaskForm.planned_hours = ''
+  newTaskForm.actual_hours = ''
+  newTaskForm.planned_cost = ''
+  newTaskForm.actual_cost = ''
+  newTaskForm.progress = 0
+  showNewTaskModal.value = true
+}
+
+async function submitNewTask() {
+  if (!newTaskParentIssue.value) return
+  const pHours = newTaskForm.planned_hours === '' ? null : Number(newTaskForm.planned_hours)
+  const aHours = newTaskForm.actual_hours === '' ? null : Number(newTaskForm.actual_hours)
+  const pCost = newTaskForm.planned_cost === '' ? null : Number(newTaskForm.planned_cost)
+  const aCost = newTaskForm.actual_cost === '' ? null : Number(newTaskForm.actual_cost)
+  if (pHours !== null && !hasAtMostTwoDecimals(pHours)) {
+    notifyToast('予定工数は小数点第2位までで入力してください', 'error')
+    return
+  }
+  if (aHours !== null && !hasAtMostTwoDecimals(aHours)) {
+    notifyToast('実績工数は小数点第2位までで入力してください', 'error')
+    return
+  }
+  if (pCost !== null && !hasAtMostTwoDecimals(pCost)) {
+    notifyToast('予定コストは小数点第2位までで入力してください', 'error')
+    return
+  }
+  if (aCost !== null && !hasAtMostTwoDecimals(aCost)) {
+    notifyToast('実績コストは小数点第2位までで入力してください', 'error')
+    return
+  }
+  try {
+    await apiFetch(`/projects/${projectId.value}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        issue_id: newTaskParentIssue.value.id,
+        title: newTaskForm.title,
+        description: newTaskForm.description,
+        planned_start_date: newTaskForm.planned_start_date || null,
+        planned_end_date: newTaskForm.planned_end_date || null,
+        planned_hours: pHours,
+        actual_hours: aHours,
+        planned_cost: pCost,
+        actual_cost: aCost,
+        progress: newTaskForm.progress
+      })
+    })
+    showNewTaskModal.value = false
+    await Promise.all([loadIssues(), loadWorkspace()])
+    notifyToast('子タスクを作成しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+function onGanttBarClick(t: Task, parentIss: Issue) {
+  if (wasDragging.value) return
+  openTaskDetail(t, parentIss)
+}
+
+function openIssueDetail(iss: Issue) {
+  detailModalState.targetType = 'issue'
+  detailModalState.issue = iss
+  detailModalState.task = null
+  detailModalState.parentIssueTitle = ''
+  detailModalState.open = true
+  router.replace({ query: { ...route.query, item: `issue:${iss.id}` } })
+}
+
+function openTaskDetail(t: Task, parentIss: Issue) {
+  detailModalState.targetType = 'task'
+  detailModalState.task = t
+  detailModalState.issue = null
+  detailModalState.parentIssueTitle = parentIss.title
+  detailModalState.open = true
+  router.replace({ query: { ...route.query, item: `task:${t.id}` } })
+}
+
+function closeDetailView() {
+  detailModalState.open = false
+  if (route.query.item || route.query.openTarget) {
+    const q = { ...route.query }
+    delete q.item
+    delete q.openTarget
+    router.replace({ query: q })
+  }
+}
+
+async function onDetailUpdated() {
+  await Promise.all([loadIssues(), loadWorkspace(), refreshProjects()])
+  if (detailModalState.targetType === 'issue' && detailModalState.issue) {
+    const updated = issues.value.find(i => i.id === detailModalState.issue?.id)
+    if (updated) detailModalState.issue = updated
+  } else if (detailModalState.targetType === 'task' && detailModalState.task) {
+    let found = false
+    for (const iss of issues.value) {
+      const x = (iss.tasks || []).find(t => t.id === detailModalState.task?.id)
+      if (x) {
+        detailModalState.task = x
+        detailModalState.parentIssueTitle = iss.title
+        found = true
+        break
+      }
+    }
+    if (!found) {
+      try {
+        const fetched = await apiFetch<Task>(`/projects/${projectId.value}/tasks/${detailModalState.task.id}`)
+        if (fetched) {
+          detailModalState.task = fetched
+          if (fetched.issue_id && !detailModalState.parentIssueTitle) {
+            const pIss = issues.value.find(i => i.id === fetched.issue_id) || await apiFetch<Issue>(`/projects/${projectId.value}/issues/${fetched.issue_id}`).catch(() => null)
+            if (pIss) detailModalState.parentIssueTitle = pIss.title
+          }
+        }
+      } catch (e) {}
+    }
+  }
+}
+
+// Project Settings Actions
+async function saveProjectSettings() {
+  if (!hasAtMostTwoDecimals(projForm.hours_per_day)) {
+    notifyToast('1日の基準時間は小数点第2位までで入力してください', 'error')
+    return
+  }
+  try {
+    await apiFetch(`/projects/${projectId.value}`, {
+      method: 'PUT',
+      body: JSON.stringify(projForm)
+    })
+    await Promise.all([loadWorkspace(), refreshProjects()])
+    notifyToast('プロジェクト基本設定を保存しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function addProjectMember() {
+  const [subject_type, subject_id] = memberForm.subject_combined.split(':')
+  if (!subject_type || !subject_id) return
+  try {
+    await apiFetch(`/projects/${projectId.value}/members`, {
+      method: 'POST',
+      body: JSON.stringify({
+        subject_type,
+        subject_id,
+        role: memberForm.role
+      })
+    })
+    memberForm.subject_combined = ''
+    await loadWorkspace()
+    notifyToast('メンバー権限を更新しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function removeProjectMember(memberId: string) {
+  try {
+    await apiFetch(`/projects/${projectId.value}/members/${memberId}`, { method: 'DELETE' })
+    await loadWorkspace()
+    notifyToast('メンバーを解除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function createStatus() {
+  try {
+    await apiFetch(`/projects/${projectId.value}/statuses`, {
+      method: 'POST',
+      body: JSON.stringify(statusForm)
+    })
+    statusForm.name = ''
+    await loadWorkspace()
+    notifyToast('ステータスを追加しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteStatus(statusId: string) {
+  const migrateTo = migrateTargetMap[statusId] || ''
+  const query = migrateTo ? `?migrate_to_status_id=${migrateTo}` : ''
+  try {
+    await apiFetch(`/projects/${projectId.value}/statuses/${statusId}${query}`, { method: 'DELETE' })
+    await loadWorkspace()
+    notifyToast('ステータスを削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function createProjectLabel() {
+  try {
+    await apiFetch(`/projects/${projectId.value}/labels`, {
+      method: 'POST',
+      body: JSON.stringify(labelForm)
+    })
+    labelForm.name = ''
+    await loadWorkspace()
+    notifyToast('ラベルを追加しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteProjectLabel(labelId: string) {
+  try {
+    await apiFetch(`/projects/${projectId.value}/labels/${labelId}`, { method: 'DELETE' })
+    await loadWorkspace()
+    notifyToast('ラベルを削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function createCustomField() {
+  const options = cfForm.options_csv
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  try {
+    await apiFetch(`/projects/${projectId.value}/custom-fields`, {
+      method: 'POST',
+      body: JSON.stringify({
+        target_type: cfForm.target_type,
+        name: cfForm.name,
+        field_type: cfForm.field_type,
+        options
+      })
+    })
+    cfForm.name = ''
+    cfForm.options_csv = ''
+    await loadWorkspace()
+    notifyToast('カスタム属性を追加しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteCustomField(fieldId: string) {
+  try {
+    await apiFetch(`/projects/${projectId.value}/custom-fields/${fieldId}`, { method: 'DELETE' })
+    await loadWorkspace()
+    notifyToast('カスタム属性を削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function saveProjectTemplate(payload: { id?: string; target_type: TargetType; name: string; rows: TemplateRow[] }) {
+  try {
+    if (payload.id) {
+      await apiFetch(`/projects/${projectId.value}/templates/${payload.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: payload.name, rows: payload.rows })
+      })
+    } else {
+      await apiFetch(`/projects/${projectId.value}/templates`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      })
+    }
+    await loadWorkspace()
+    notifyToast('テンプレートを保存しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteProjectTemplate(tplId: string) {
+  try {
+    await apiFetch(`/projects/${projectId.value}/templates/${tplId}`, { method: 'DELETE' })
+    await loadWorkspace()
+    notifyToast('テンプレートを削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+function getLabel(id: string): Label | undefined {
+  return allLabels.value.find(l => l.id === id)
+}
+
+function getStatusName(id: string): string {
+  return statuses.value.find(s => s.id === id)?.name || '-'
+}
+
+function getUserName(id: string): string {
+  return users.value.find(u => u.id === id)?.display_name || id.slice(0, 8)
+}
+
+function getGroupName(id: string): string {
+  return allGroups.value.find(g => g.id === id)?.name || id.slice(0, 8)
+}
+
+// Webhook State & Methods
+const projectWebhooks = ref<Webhook[]>([])
+const showNewWebhookModal = ref(false)
+const selectedWebhookForLogs = ref<Webhook | null>(null)
+const webhookDeliveries = ref<WebhookDelivery[]>([])
+const expandedDeliveryId = ref<string | null>(null)
+
+const newWebhookForm = reactive({
+  name: '',
+  url: '',
+  secret: '',
+  events: ['task.created', 'task.updated', 'issue.created', 'comment.created']
+})
+
+const editingWebhook = ref<Webhook | null>(null)
+const editingWebhookForm = reactive({
+  name: '',
+  url: '',
+  secret: '',
+  is_active: true,
+  events: [] as string[]
+})
+
+function openEditWebhook(wh: Webhook) {
+  editingWebhook.value = wh
+  editingWebhookForm.name = wh.name
+  editingWebhookForm.url = wh.url
+  editingWebhookForm.secret = ''
+  editingWebhookForm.is_active = wh.is_active
+  editingWebhookForm.events = [...wh.events]
+}
+
+async function updateProjectWebhook() {
+  if (!editingWebhook.value) return
+  try {
+    const payload: Record<string, any> = {
+      name: editingWebhookForm.name,
+      url: editingWebhookForm.url,
+      events: editingWebhookForm.events,
+      is_active: editingWebhookForm.is_active
+    }
+    if (editingWebhookForm.secret) {
+      payload.secret = editingWebhookForm.secret
+    }
+    await apiFetch(`/projects/${projectId.value}/webhooks/${editingWebhook.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    })
+    editingWebhook.value = null
+    await loadProjectWebhooks()
+    notifyToast('Webhook を更新しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function loadProjectWebhooks() {
+  try {
+    projectWebhooks.value = await apiFetch<Webhook[]>(`/projects/${projectId.value}/webhooks`)
+  } catch (e: any) {
+    // ignore
+  }
+}
+
+async function createProjectWebhook() {
+  try {
+    await apiFetch(`/projects/${projectId.value}/webhooks`, {
+      method: 'POST',
+      body: JSON.stringify(newWebhookForm)
+    })
+    showNewWebhookModal.value = false
+    newWebhookForm.name = ''
+    newWebhookForm.url = ''
+    newWebhookForm.secret = ''
+    await loadProjectWebhooks()
+    notifyToast('Webhook を登録しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function testProjectWebhook(webhookId: string) {
+  try {
+    const res = await apiFetch<WebhookDelivery>(`/projects/${projectId.value}/webhooks/${webhookId}/test`, {
+      method: 'POST'
+    })
+    if (res.status_code && res.status_code >= 200 && res.status_code < 300) {
+      notifyToast(`テスト送信成功 (HTTP ${res.status_code} / ${res.duration_ms}ms)`, 'success')
+    } else {
+      notifyToast(`テスト送信失敗 (${res.error_message || `HTTP ${res.status_code}`})`, 'error')
+    }
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function openWebhookDeliveries(wh: Webhook) {
+  selectedWebhookForLogs.value = wh
+  expandedDeliveryId.value = null
+  try {
+    webhookDeliveries.value = await apiFetch<WebhookDelivery[]>(`/projects/${projectId.value}/webhooks/${wh.id}/deliveries`)
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteProjectWebhook(webhookId: string) {
+  if (!confirm('この Webhook を削除しますか？')) return
+  try {
+    await apiFetch(`/projects/${projectId.value}/webhooks/${webhookId}`, { method: 'DELETE' })
+    await loadProjectWebhooks()
+    notifyToast('Webhook を削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+</script>
+

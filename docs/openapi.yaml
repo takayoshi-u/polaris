@@ -1,0 +1,1609 @@
+openapi: 3.0.3
+info:
+  title: Polaris Project Management API
+  version: 1.0.0
+  description: |
+    Polaris プロジェクト管理WebアプリケーションのバックエンドREST API仕様書。
+    - 主キーはすべて **UUID v7**
+    - プロジェクト ＞ 課題（Issue） ＞ タスク（Task）の階層構造
+    - 3層の権限管理（システム権限 / プロジェクトロール / テンプレート項目別の閲覧・編集制限＋オーナー許可）
+    - 1〜3カラム可変レイアウトテンプレート・カスタム項目（9種）
+    - ガントチャート（予定・実績2段バー操作）・マトリクス型カンバン（縦横・セル内移動）
+    - 最大100件・1ファイル最大1GBの添付ファイル一元管理（SHA-256重複排除＋DBチャンク格納）
+    - ダイレクトMX送信 / 外部SMTPリレーによるメール配信・ドメイン末尾一致制限（最大10件）
+    - アプリ内通知およびFCMプッシュ通知
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local Development Server
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: polaris_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        warning_code:
+          type: string
+        is_member:
+          type: boolean
+
+    SubjectRef:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [user, group]
+        id:
+          type: string
+          format: uuid
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        has_password:
+          type: boolean
+        google_sub:
+          type: string
+          nullable: true
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        status:
+          type: string
+          enum: [invited, active, disabled]
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [create_project, delete_project, manage_system]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SystemSettings:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        default_hours_per_day:
+          type: number
+          minimum: 1
+          maximum: 24
+          multipleOf: 0.01
+          description: 1日あたりの基準時間（1.00〜24.00、小数点第2位まで）
+        default_issue_template_id:
+          type: string
+          format: uuid
+          nullable: true
+        default_task_template_id:
+          type: string
+          format: uuid
+          nullable: true
+        allowed_domains:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    SMTPSettings:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+        host:
+          type: string
+        port:
+          type: integer
+        use_auth:
+          type: boolean
+        username:
+          type: string
+        has_password:
+          type: boolean
+        from_email:
+          type: string
+        from_name:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        member_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        hours_per_day:
+          type: number
+          minimum: 1
+          maximum: 24
+          multipleOf: 0.01
+          description: 1日あたりの基準時間（1.00〜24.00、小数点第2位まで）
+        default_issue_template_id:
+          type: string
+          format: uuid
+          nullable: true
+        default_task_template_id:
+          type: string
+          format: uuid
+          nullable: true
+        total_planned_cost:
+          type: number
+          multipleOf: 0.01
+          description: プロジェクト配下全タスクの予定コスト集計値（小数点第2位まで）
+        total_actual_cost:
+          type: number
+          multipleOf: 0.01
+          description: プロジェクト配下全タスクの実績コスト集計値（小数点第2位まで）
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        current_user_role:
+          type: string
+          enum: ["", viewer, editor, admin]
+        is_member:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Status:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        display_order:
+          type: integer
+          minimum: 1
+          maximum: 10
+        name:
+          type: string
+        color:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Label:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        color:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CustomFieldDefinition:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        target_type:
+          type: string
+          enum: [issue, task]
+        name:
+          type: string
+        field_type:
+          type: string
+          enum: [text_single, text_multi, markdown, number, date, radio, checkbox, select, user_group]
+        options:
+          type: array
+          items: {}
+        created_at:
+          type: string
+          format: date-time
+
+    TemplateField:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        column_order:
+          type: integer
+          minimum: 1
+          maximum: 3
+        field_source:
+          type: string
+          enum: [standard, custom]
+        field_key:
+          type: string
+        is_hidden:
+          type: boolean
+          description: 画面上でその項目自体を非表示にするフラグ（titleは常時false）
+        is_restricted:
+          type: boolean
+        allow_owner_view:
+          type: boolean
+        allow_owner_edit:
+          type: boolean
+        view_subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        edit_subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+
+    TemplateRow:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        row_order:
+          type: integer
+        columns_count:
+          type: integer
+          minimum: 1
+          maximum: 3
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateField'
+
+    Template:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        target_type:
+          type: string
+          enum: [issue, task]
+        name:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateRow'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FieldPermissionState:
+      type: object
+      properties:
+        is_hidden:
+          type: boolean
+        can_view:
+          type: boolean
+        can_edit:
+          type: boolean
+        placeholder:
+          type: string
+
+    IssueRollup:
+      type: object
+      properties:
+        planned_start_date:
+          type: string
+          format: date
+          nullable: true
+        planned_end_date:
+          type: string
+          format: date
+          nullable: true
+        actual_start_date:
+          type: string
+          format: date
+          nullable: true
+        actual_end_date:
+          type: string
+          format: date
+          nullable: true
+        total_planned_hours:
+          type: number
+          multipleOf: 0.01
+        total_actual_hours:
+          type: number
+          multipleOf: 0.01
+        total_planned_cost:
+          type: number
+          multipleOf: 0.01
+          description: 配下タスクの予定コスト合計（小数点第2位まで）
+        total_actual_cost:
+          type: number
+          multipleOf: 0.01
+          description: 配下タスクの実績コスト合計（小数点第2位まで）
+        weighted_progress:
+          type: number
+        assignees:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        task_count:
+          type: integer
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        issue_id:
+          type: string
+          format: uuid
+        template_id:
+          type: string
+          format: uuid
+          nullable: true
+        owner_user_id:
+          type: string
+          format: uuid
+        status_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        planned_start_date:
+          type: string
+          format: date
+          nullable: true
+        planned_end_date:
+          type: string
+          format: date
+          nullable: true
+        actual_start_date:
+          type: string
+          format: date
+          nullable: true
+        actual_end_date:
+          type: string
+          format: date
+          nullable: true
+        planned_hours:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          description: 予定工数（h、小数点第2位まで）
+          nullable: true
+        actual_hours:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          description: 実績工数（h、小数点第2位まで）
+          nullable: true
+        planned_cost:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          description: 予定コスト（小数点第2位まで、0以上）
+          nullable: true
+        actual_cost:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          description: 実績コスト（小数点第2位まで、0以上）
+          nullable: true
+        assignees:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        label_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        custom_values:
+          type: object
+          additionalProperties: true
+        field_permissions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FieldPermissionState'
+        kanban_order:
+          type: integer
+        gantt_order:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Issue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        template_id:
+          type: string
+          format: uuid
+          nullable: true
+        owner_user_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [open, closed]
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        label_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        custom_values:
+          type: object
+          additionalProperties: true
+        field_permissions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FieldPermissionState'
+        display_order:
+          type: integer
+        rollup:
+          $ref: '#/components/schemas/IssueRollup'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        target_type:
+          type: string
+          enum: [issue, task]
+        target_id:
+          type: string
+          format: uuid
+        blob_id:
+          type: string
+          format: uuid
+        sha512_hash:
+          type: string
+        file_name:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        uploaded_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        target_type:
+          type: string
+          enum: [issue, task]
+        target_id:
+          type: string
+          format: uuid
+        author_user_id:
+          type: string
+          format: uuid
+        body:
+          type: string
+        mentions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        notification_type:
+          type: string
+          enum: [mention, assign]
+        target_type:
+          type: string
+          enum: [issue, task]
+        target_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+        is_read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    PersonalAccessToken:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        token_prefix:
+          type: string
+          example: "plr_pat_123456"
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - read:projects
+              - write:projects
+              - read:tasks
+              - write:tasks
+              - read:issues
+              - write:issues
+              - read:comments
+              - write:comments
+              - admin:system
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        secret:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+            enum:
+              - task.created
+              - task.updated
+              - task.status_changed
+              - issue.created
+              - issue.state_changed
+              - comment.created
+              - attachment.created
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        webhook_id:
+          type: string
+          format: uuid
+        event:
+          type: string
+        status_code:
+          type: integer
+          nullable: true
+        duration_ms:
+          type: integer
+        request_body:
+          type: object
+        response_body:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+paths:
+  /health:
+    get:
+      summary: ヘルスチェック
+      security: []
+      responses:
+        '200':
+          description: OK
+
+  /setup/status:
+    get:
+      summary: 初期セットアップ要否確認（ユーザー0件判定）
+      security: []
+      responses:
+        '200':
+          description: セットアップ状態
+
+  /setup/init:
+    post:
+      summary: 初期システム管理者アカウント作成（ユーザー0件時のみ有効）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                display_name: { type: string }
+                google_sub: { type: string }
+      responses:
+        '201':
+          description: 初期管理者作成完了
+
+  /auth/login:
+    post:
+      summary: メールアドレス＋パスワードによるログイン
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: ログイン成功
+
+  /auth/google/url:
+    get:
+      summary: Google OAuth 認可URL取得
+      security: []
+      responses:
+        '200':
+          description: 認可URL
+
+  /auth/google/callback:
+    post:
+      summary: Google OAuth コールバック認証・ログイン
+      security: []
+      responses:
+        '200':
+          description: ログイン成功
+
+  /auth/logout:
+    post:
+      summary: ログアウト（セッション失効）
+      responses:
+        '200':
+          description: ログアウト完了
+
+  /auth/invite/accept:
+    post:
+      summary: 招待トークン（72時間有効）の受諾と初期設定
+      security: []
+      responses:
+        '200':
+          description: アカウント有効化完了
+
+  /auth/password-reset/request:
+    post:
+      summary: パスワードリセットメール送信要求（1時間有効）
+      security: []
+      responses:
+        '200':
+          description: メール送信完了
+
+  /auth/password-reset/confirm:
+    post:
+      summary: パスワードリセットトークンによる新パスワード設定
+      security: []
+      responses:
+        '200':
+          description: 再設定完了
+
+  /auth/email-change/confirm:
+    post:
+      summary: メールアドレス変更確認トークン（1時間有効）による変更確定
+      security: []
+      responses:
+        '200':
+          description: メール変更完了
+
+  /auth/me:
+    get:
+      summary: ログイン中ユーザー情報取得
+      responses:
+        '200':
+          description: ユーザー情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /auth/me/profile:
+    put:
+      summary: 自身のプロフィール更新
+      responses:
+        '200':
+          description: 更新後ユーザー情報
+
+  /auth/me/password:
+    put:
+      summary: 自身のパスワード新規設定（Google認証のみの場合）または変更（現在のパスワード確認必須）
+      responses:
+        '200':
+          description: 更新完了
+
+  /auth/me/email-change:
+    post:
+      summary: 自身のログインメールアドレス変更申請（現在のパスワード確認必須・ドメイン制限適用・確認メール送信）
+      responses:
+        '200':
+          description: 確認メール送信完了
+
+  /system/settings:
+    get:
+      summary: システム設定（1日基準時間・許可ドメイン等）取得
+      responses:
+        '200':
+          description: システム設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemSettings'
+    put:
+      summary: システム設定更新（manage_system権限必須）
+      responses:
+        '200':
+          description: 更新完了
+
+  /system/smtp:
+    get:
+      summary: 外部SMTP設定取得（manage_system権限必須）
+      responses:
+        '200':
+          description: SMTP設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SMTPSettings'
+    put:
+      summary: 外部SMTP設定更新（manage_system権限必須）
+      responses:
+        '200':
+          description: 更新完了
+
+  /system/smtp/test:
+    post:
+      summary: テストメール送信（manage_system権限必須）
+      responses:
+        '200':
+          description: 送信成功
+
+  /system/permissions:
+    get:
+      summary: システム権限一覧取得（manage_system権限必須）
+      responses:
+        '200':
+          description: 権限一覧
+    post:
+      summary: システム権限付与（manage_system権限必須）
+      responses:
+        '201':
+          description: 付与完了
+
+  /system/permissions/{id}:
+    delete:
+      summary: システム権限剥奪（manage_system権限必須）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 削除完了
+
+  /users:
+    get:
+      summary: ユーザー一覧取得
+      responses:
+        '200':
+          description: ユーザー一覧
+    post:
+      summary: 管理者による新規ユーザーの直接アカウント登録（manage_system権限必須・即時active・ドメイン制限適用）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                display_name: { type: string }
+                password: { type: string, minLength: 8 }
+                group_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+                permissions:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: 直接アカウント登録完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /users/invite:
+    post:
+      summary: 新規ユーザー事前登録・招待メール送信（manage_system権限必須・ドメイン制限適用）
+      responses:
+        '201':
+          description: 招待作成完了
+
+  /users/{userId}/resend-invite:
+    post:
+      summary: 招待メール再送（manage_system権限必須）
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 再送完了
+
+  /users/{userId}/email:
+    put:
+      summary: 管理者によるユーザーのメールアドレス変更（manage_system権限必須・パスワード確認不要・ドメイン制限適用）
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 更新完了
+
+  /users/{userId}/status:
+    put:
+      summary: ユーザーの有効化・無効化（manage_system権限必須・物理削除せず無効化）
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 更新完了
+
+  /system/statuses:
+    get:
+      summary: システム全体のデフォルトステータス一覧（1〜10）取得
+      responses:
+        '200':
+          description: ステータス一覧
+    post:
+      summary: システム全体のデフォルトステータス追加（manage_system権限必須）
+      responses:
+        '201':
+          description: 作成完了
+
+  /system/statuses/reset:
+    post:
+      summary: システム全体のデフォルトステータスを初期4種（未着手、進行中、レビュー中、完了）へリセット（manage_system権限必須）
+      responses:
+        '200':
+          description: リセット完了（ステータス一覧を返却）
+
+  /system/custom-fields:
+    get:
+      summary: システム全体のデフォルト用カスタム項目定義一覧取得
+      responses:
+        '200':
+          description: カスタム項目一覧
+    post:
+      summary: システム全体のデフォルト用カスタム項目定義作成（manage_system権限必須）
+      responses:
+        '201':
+          description: 作成完了
+
+  /system/templates:
+    get:
+      summary: システム全体のデフォルトテンプレート一覧取得
+      responses:
+        '200':
+          description: テンプレート一覧
+    post:
+      summary: システム全体のデフォルトテンプレート作成（manage_system権限必須）
+      responses:
+        '201':
+          description: 作成完了
+
+  /groups:
+    get:
+      summary: システム全体グループ一覧取得
+      responses:
+        '200':
+          description: グループ一覧
+    post:
+      summary: システム全体グループ作成（manage_system権限必須）
+      responses:
+        '201':
+          description: 作成完了
+
+  /labels:
+    get:
+      summary: システム共通ラベル一覧取得
+      responses:
+        '200':
+          description: ラベル一覧
+    post:
+      summary: システム共通ラベル作成（manage_system権限必須）
+      responses:
+        '201':
+          description: 作成完了
+
+  /projects:
+    get:
+      summary: プロジェクト一覧取得（delete_project権限保持者は include_non_member=true で非参加プロジェクトも取得可）
+      parameters:
+        - in: query
+          name: include_non_member
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: プロジェクト一覧
+    post:
+      summary: プロジェクト新規作成（create_project権限必須・システムデフォルトの基準時間/ステータス/テンプレートを初期コピー）
+      responses:
+        '201':
+          description: 作成完了
+
+  /projects/{projectId}:
+    get:
+      summary: プロジェクト詳細取得
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: プロジェクト詳細
+    put:
+      summary: プロジェクト設定更新（プロジェクトAdmin必須）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 更新完了
+    delete:
+      summary: プロジェクト削除（delete_project権限必須・非参加プロジェクト削除時は confirm_non_member=true 無しで409警告返却）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: confirm_non_member
+          schema: { type: boolean }
+      responses:
+        '204':
+          description: 削除完了
+        '409':
+          description: 非参加プロジェクト削除確認警告
+
+  /projects/{projectId}/members:
+    get:
+      summary: プロジェクト参加メンバー・グループ一覧取得
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: メンバー一覧
+    post:
+      summary: プロジェクトメンバー・グループの追加・ロール設定（admin / editor / viewer）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 設定完了
+
+  /projects/{projectId}/statuses:
+    get:
+      summary: プロジェクトのステータス一覧（1〜10）取得
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: ステータス一覧
+    post:
+      summary: プロジェクトのステータス追加（1〜10、順序重複不可・名称重複可）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 作成完了
+
+  /projects/{projectId}/statuses/{statusId}:
+    delete:
+      summary: プロジェクトのステータス削除（タスクが存在する場合は migrate_to_status_id 指定必須）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: statusId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: migrate_to_status_id
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 削除完了
+
+  /projects/{projectId}/templates:
+    get:
+      summary: プロジェクトのテンプレート一覧取得
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: テンプレート一覧
+    post:
+      summary: プロジェクトのテンプレート作成（1〜3カラム可変レイアウト＋標準項目配置必須＋項目別権限設定）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 作成完了
+
+  /projects/{projectId}/issues:
+    get:
+      summary: 課題＋配下タスク一覧取得（ロールアップ集計・項目別権限マスク・複合AND検索フィルタ対応）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: label_ids
+          description: カンマ区切りラベルID（AND検索）
+          schema: { type: string }
+        - in: query
+          name: assignee_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: state
+          schema: { type: string, enum: [open, closed, all], default: open }
+        - in: query
+          name: keyword
+          schema: { type: string }
+      responses:
+        '200':
+          description: 課題一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Issue'
+    post:
+      summary: 課題作成（create_initial_task=true で同名の初期タスクを最小順序ステータスへ同時作成可能）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 作成完了
+
+  /projects/{projectId}/issues/{issueId}/owner:
+    put:
+      summary: 課題のオーナー権限委譲（現オーナーまたはプロジェクトAdminのみ可能）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: issueId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 委譲完了
+
+  /projects/{projectId}/tasks:
+    post:
+      summary: タスク作成（必ず親課題 issue_id に紐づく・ステータス省略時は最小順序ステータスへ自動割当）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 作成完了
+
+  /projects/{projectId}/tasks/{taskId}/owner:
+    put:
+      summary: タスクのオーナー権限委譲（現オーナーまたはプロジェクトAdminのみ可能）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 委譲完了
+
+  /projects/{projectId}/tasks/{taskId}/kanban-move:
+    patch:
+      summary: カンバンでのドラッグ＆ドロップ移動（横移動＝ステータス変更、縦移動＝親課題変更、セル内順序変更）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 移動完了
+
+  /projects/{projectId}/tasks/{taskId}/gantt-dates:
+    patch:
+      summary: ガントチャートでの予定バー・実績バー期間変更（日付未設定タスクのバー直接作成にも対応）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 期間更新完了
+
+  /projects/{projectId}/{targetType}/{targetId}/comments:
+    get:
+      summary: 課題またはタスクのコメント一覧取得
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: targetType
+          required: true
+          schema: { type: string, enum: [issues, tasks] }
+        - in: path
+          name: targetId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: コメント一覧
+    post:
+      summary: コメント投稿（個人/グループメンション時に操作者本人を除いて通知＆FCM配信）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: targetType
+          required: true
+          schema: { type: string, enum: [issues, tasks] }
+        - in: path
+          name: targetId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 投稿完了
+
+  /projects/{projectId}/{targetType}/{targetId}/attachments:
+    get:
+      summary: 課題またはタスクの添付ファイル一覧取得（コメント時に添付したファイルもここへ一元集約）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: targetType
+          required: true
+          schema: { type: string, enum: [issues, tasks] }
+        - in: path
+          name: targetId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 添付ファイル一覧
+    post:
+      summary: 添付ファイルアップロード（最大100件・最大1GB/ファイル・SHA-512重複排除・DBチャンク格納）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: targetType
+          required: true
+          schema: { type: string, enum: [issues, tasks] }
+        - in: path
+          name: targetId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: アップロード完了
+
+  /projects/{projectId}/attachments/{attachmentId}/download:
+    get:
+      summary: 添付ファイルダウンロード（プロジェクト参加メンバーのみ可能）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: attachmentId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: ファイルバイナリストリーム
+
+  /projects/{projectId}/attachments/{attachmentId}:
+    delete:
+      summary: 添付ファイル削除（アップロード者・課題/タスクオーナー・プロジェクトAdminのみ可能、未参照Blobは自動削除）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: attachmentId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 削除完了
+
+  /notifications:
+    get:
+      summary: アプリ内通知一覧取得
+      responses:
+        '200':
+          description: 通知一覧
+
+  /fcm-tokens:
+    post:
+      summary: FCMデバイストークン登録（複数端末対応）
+      responses:
+        '201':
+          description: 登録完了
+    delete:
+      summary: FCMデバイストークン削除
+      responses:
+        '204':
+          description: 削除完了
+
+  /user/tokens:
+    get:
+      summary: ログインユーザーのPersonal Access Token（APIキー）一覧取得
+      responses:
+        '200':
+          description: トークン一覧
+    post:
+      summary: Personal Access Token（APIキー）新規発行（平文トークンは一度のみ返却）
+      responses:
+        '201':
+          description: 発行完了
+
+  /user/tokens/{tokenId}:
+    delete:
+      summary: Personal Access Token（APIキー）失効
+      parameters:
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 失効完了
+
+  /projects/{projectId}/webhooks:
+    get:
+      summary: プロジェクト個別Outbound Webhook一覧取得（Admin権限必須）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Webhook一覧
+    post:
+      summary: プロジェクト個別Outbound Webhook登録（Admin権限必須）
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: 登録完了
+
+  /projects/{projectId}/webhooks/{webhookId}:
+    get:
+      summary: プロジェクト個別Webhook詳細取得
+      responses:
+        '200':
+          description: 詳細
+    put:
+      summary: プロジェクト個別Webhook設定更新
+      responses:
+        '200':
+          description: 更新完了
+    delete:
+      summary: プロジェクト個別Webhook削除
+      responses:
+        '204':
+          description: 削除完了
+
+  /projects/{projectId}/webhooks/{webhookId}/test:
+    post:
+      summary: プロジェクト個別Webhookテスト送信（Ping疎通確認）
+      responses:
+        '200':
+          description: 配信テスト結果
+
+  /projects/{projectId}/webhooks/{webhookId}/deliveries:
+    get:
+      summary: プロジェクト個別Webhook配信履歴ログ取得
+      responses:
+        '200':
+          description: 配信履歴一覧
+
+  /system/webhooks:
+    get:
+      summary: システム全体Outbound Webhook一覧取得（manage_system権限必須）
+      responses:
+        '200':
+          description: Webhook一覧
+    post:
+      summary: システム全体Outbound Webhook登録（manage_system権限必須）
+      responses:
+        '201':
+          description: 登録完了
+
+  /system/webhooks/{webhookId}:
+    get:
+      summary: システム全体Webhook詳細取得
+      responses:
+        '200':
+          description: 詳細
+    put:
+      summary: システム全体Webhook設定更新
+      responses:
+        '200':
+          description: 更新完了
+    delete:
+      summary: システム全体Webhook削除
+      responses:
+        '204':
+          description: 削除完了
+
+  /system/webhooks/{webhookId}/test:
+    post:
+      summary: システム全体Webhookテスト送信（Ping疎通確認）
+      responses:
+        '200':
+          description: 配信テスト結果
+
+  /system/webhooks/{webhookId}/deliveries:
+    get:
+      summary: システム全体Webhook配信履歴ログ取得
+      responses:
+        '200':
+          description: 配信履歴一覧
+

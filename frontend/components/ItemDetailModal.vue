@@ -346,6 +346,30 @@
               <span>(小数第2位まで)</span>
             </div>
 
+            <!-- Standard Field: story_points (Task) -->
+            <div v-else-if="field.field_source === 'standard' && field.field_key === 'story_points'" style="display: flex; align-items: center; gap: 8px;">
+              <input
+                v-model="form.story_points"
+                type="number"
+                min="0"
+                step="0.1"
+                :disabled="!isFieldEditable(field)"
+                style="width: 140px;"
+                placeholder="SP (例: 3)"
+              />
+              <span style="font-size: 12px; color: var(--text-muted);">(0以上、小数第1位まで)</span>
+            </div>
+
+            <!-- Standard Field: sprint_id (Task) -->
+            <div v-else-if="field.field_source === 'standard' && field.field_key === 'sprint_id'">
+              <select v-model="form.sprint_id" :disabled="!isFieldEditable(field)" style="width: 100%;">
+                <option value="">(未割当バックログ)</option>
+                <option v-for="sp in projectSprints" :key="sp.id" :value="sp.id">
+                  {{ sp.status === 'active' ? '⚡ ' : '📅 ' }}{{ sp.name }} ({{ sp.status === 'active' ? 'アクティブ' : sp.status === 'closed' ? '完了' : '計画中' }})
+                </option>
+              </select>
+            </div>
+
             <!-- Standard Field: assignees (Task) -->
             <div v-else-if="field.field_source === 'standard' && field.field_key === 'assignees'">
               <div style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -452,6 +476,194 @@
               <template v-else>
                 <input v-model="form.custom_values[field.field_key]" type="text" :disabled="!isFieldEditable(field)" style="width: 100%;" />
               </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agile & Sprint Attributes (Task Only) -->
+      <div v-if="targetType === 'task'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
+        <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+          <span>🏃 スプリント ＆ ストーリーポイント設定</span>
+        </h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; background: var(--bg-input); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+          <div>
+            <label class="field-label" style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; display: block;">ストーリーポイント (SP)</label>
+            <input
+              v-model="form.story_points"
+              type="number"
+              min="0"
+              step="0.1"
+              :disabled="!canEditAny"
+              style="width: 100%;"
+              placeholder="例: 3, 5, 8"
+            />
+            <span style="font-size: 11px; color: var(--text-muted);">0以上の数値（0.1単位）</span>
+          </div>
+          <div>
+            <label class="field-label" style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; display: block;">所属スプリント</label>
+            <select v-model="form.sprint_id" :disabled="!canEditAny" style="width: 100%;">
+              <option value="">(未割当バックログ)</option>
+              <option v-for="sp in projectSprints" :key="sp.id" :value="sp.id">
+                {{ sp.status === 'active' ? '⚡ ' : '📅 ' }}{{ sp.name }} ({{ sp.status === 'active' ? 'アクティブ' : sp.status === 'closed' ? '完了' : '計画中' }})
+              </option>
+            </select>
+            <span style="font-size: 11px; color: var(--text-muted);">バックログまたは対象スプリントを選択</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task Dependencies Section (Task Only) -->
+      <div v-if="targetType === 'task'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+            <span>🔗 タスク依存関係（FS / SS / FF / SF）</span>
+            <span class="badge badge-slate" style="font-size: 11px;">先行 {{ predecessorDeps.length }}件 / 後続 {{ successorDeps.length }}件</span>
+          </h3>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+          <!-- Predecessor Tasks -->
+          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input);">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between;">
+              <span>◀ 先行タスク（前提タスク）</span>
+              <span class="badge badge-blue" style="font-size: 10px;">{{ predecessorDeps.length }}件</span>
+            </div>
+            <div v-if="predecessorDeps.length === 0" style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">
+              先行タスクはありません
+            </div>
+            <div v-else style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;">
+              <div
+                v-for="dep in predecessorDeps"
+                :key="dep.id"
+                style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px;"
+              >
+                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;">
+                  <span class="badge badge-blue" style="font-size: 10px; margin-right: 4px;">{{ dep.dependency_type || 'FS' }}</span>
+                  <span v-if="dep.lag_days" class="badge badge-slate" style="font-size: 10px; margin-right: 4px;">+{{ dep.lag_days }}d</span>
+                  <strong>{{ getTaskTitle(dep.predecessor_id) }}</strong>
+                </div>
+                <button
+                  v-if="canEditAny"
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  style="color: var(--danger); padding: 2px 6px; font-size: 11px;"
+                  title="依存関係を解除"
+                  @click="removeDependency(dep.id)"
+                >
+                  解除
+                </button>
+              </div>
+            </div>
+
+            <!-- Add Predecessor Form -->
+            <div v-if="canEditAny" style="display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--border-color); padding-top: 8px;">
+              <div style="font-size: 11px; font-weight: 600; color: var(--text-muted);">先行タスクを追加:</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <select v-model="newPredecessorId" style="flex: 1; min-width: 140px; font-size: 12px;">
+                  <option value="">-- タスクを選択 --</option>
+                  <option
+                    v-for="t in availablePredecessorTasks"
+                    :key="t.id"
+                    :value="t.id"
+                  >
+                    {{ t.title }}
+                  </option>
+                </select>
+                <select v-model="newDepType" style="width: 70px; font-size: 12px;" title="依存タイプ">
+                  <option value="FS">FS</option>
+                  <option value="SS">SS</option>
+                  <option value="FF">FF</option>
+                  <option value="SF">SF</option>
+                </select>
+                <input
+                  v-model.number="newDepLag"
+                  type="number"
+                  placeholder="Lag"
+                  title="ラグ日数"
+                  style="width: 50px; font-size: 12px;"
+                />
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  :disabled="!newPredecessorId || isAddingDep"
+                  @click="createDependency('predecessor')"
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Successor Tasks -->
+          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input);">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-main); display: flex; align-items: center; justify-content: space-between;">
+              <span>▶ 後続タスク（依存されるタスク）</span>
+              <span class="badge badge-blue" style="font-size: 10px;">{{ successorDeps.length }}件</span>
+            </div>
+            <div v-if="successorDeps.length === 0" style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">
+              後続タスクはありません
+            </div>
+            <div v-else style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;">
+              <div
+                v-for="dep in successorDeps"
+                :key="dep.id"
+                style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px;"
+              >
+                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;">
+                  <span class="badge badge-blue" style="font-size: 10px; margin-right: 4px;">{{ dep.dependency_type || 'FS' }}</span>
+                  <span v-if="dep.lag_days" class="badge badge-slate" style="font-size: 10px; margin-right: 4px;">+{{ dep.lag_days }}d</span>
+                  <strong>{{ getTaskTitle(dep.successor_id) }}</strong>
+                </div>
+                <button
+                  v-if="canEditAny"
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  style="color: var(--danger); padding: 2px 6px; font-size: 11px;"
+                  title="依存関係を解除"
+                  @click="removeDependency(dep.id)"
+                >
+                  解除
+                </button>
+              </div>
+            </div>
+
+            <!-- Add Successor Form -->
+            <div v-if="canEditAny" style="display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--border-color); padding-top: 8px;">
+              <div style="font-size: 11px; font-weight: 600; color: var(--text-muted);">後続タスクを追加:</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <select v-model="newSuccessorId" style="flex: 1; min-width: 140px; font-size: 12px;">
+                  <option value="">-- タスクを選択 --</option>
+                  <option
+                    v-for="t in availableSuccessorTasks"
+                    :key="t.id"
+                    :value="t.id"
+                  >
+                    {{ t.title }}
+                  </option>
+                </select>
+                <select v-model="newDepType" style="width: 70px; font-size: 12px;" title="依存タイプ">
+                  <option value="FS">FS</option>
+                  <option value="SS">SS</option>
+                  <option value="FF">FF</option>
+                  <option value="SF">SF</option>
+                </select>
+                <input
+                  v-model.number="newDepLag"
+                  type="number"
+                  placeholder="Lag"
+                  title="ラグ日数"
+                  style="width: 50px; font-size: 12px;"
+                />
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  :disabled="!newSuccessorId || isAddingDep"
+                  @click="createDependency('successor')"
+                >
+                  追加
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -697,16 +909,19 @@ import type {
   Attachment,
   Comment,
   CustomFieldDefinition,
+  DependencyType,
   FieldPermissionState,
   Group,
   Issue,
   Label,
   ProjectRole,
+  Sprint,
   Status,
   SubjectRef,
   SubjectType,
   TargetType,
   Task,
+  TaskDependency,
   Template,
   TemplateField,
   TemplateRow,
@@ -728,6 +943,8 @@ const props = defineProps<{
   templates: Template[]
   users: User[]
   groups: Group[]
+  sprints?: Sprint[]
+  allTasks?: Task[]
 }>()
 
 const emit = defineEmits<{
@@ -844,6 +1061,8 @@ const form = reactive({
   actual_hours: '' as string | number,
   planned_cost: '' as string | number,
   actual_cost: '' as string | number,
+  story_points: '' as string | number,
+  sprint_id: '' as string,
   assignees: [] as SubjectRef[],
   label_ids: [] as string[],
   custom_values: {} as Record<string, any>
@@ -956,6 +1175,8 @@ function initForm() {
     form.actual_hours = props.task.actual_hours ?? ''
     form.planned_cost = props.task.planned_cost ?? ''
     form.actual_cost = props.task.actual_cost ?? ''
+    form.story_points = props.task.story_points ?? ''
+    form.sprint_id = props.task.sprint_id ?? ''
     form.assignees = JSON.parse(JSON.stringify(props.task.assignees || []))
     form.label_ids = [...(props.task.label_ids || [])]
     form.custom_values = JSON.parse(JSON.stringify(props.task.custom_values || {}))
@@ -1138,6 +1359,13 @@ async function saveItem() {
         }
         payload.actual_cost = aCost
       }
+
+      if (form.story_points !== '' && form.story_points !== null) {
+        payload.story_points = Number(form.story_points)
+      } else {
+        payload.story_points = null
+      }
+      payload.sprint_id = form.sprint_id || null
 
       if (isKeyEditable('assignees')) payload.assignees = form.assignees
       if (isKeyEditable('labels')) payload.label_ids = form.label_ids
@@ -1516,6 +1744,126 @@ function getUserName(uid: string): string {
 function getSubjectLabel(s: SubjectRef): string {
   if (s.type === 'user') return getUserName(s.id)
   return props.groups.find(g => g.id === s.id)?.name || s.id.slice(0, 8)
+}
+
+// Sprint and Dependency State
+const projectSprints = ref<Sprint[]>([])
+const projectDependencies = ref<TaskDependency[]>([])
+const allTasksList = ref<Task[]>([])
+const newPredecessorId = ref('')
+const newSuccessorId = ref('')
+const newDepType = ref<DependencyType>('FS')
+const newDepLag = ref(0)
+const isAddingDep = ref(false)
+
+async function loadSprintsAndDependencies() {
+  if (!props.projectId) return
+  try {
+    const [sps, deps] = await Promise.all([
+      props.sprints ? Promise.resolve(props.sprints) : apiFetch<Sprint[]>(`/projects/${props.projectId}/sprints`).catch(() => []),
+      apiFetch<TaskDependency[]>(`/projects/${props.projectId}/dependencies`).catch(() => [])
+    ])
+    projectSprints.value = sps || []
+    projectDependencies.value = deps || []
+  } catch {}
+}
+
+async function loadAllProjectTasks() {
+  if (props.allTasks && props.allTasks.length > 0) {
+    allTasksList.value = props.allTasks
+    return
+  }
+  try {
+    const issuesList = await apiFetch<Issue[]>(`/projects/${props.projectId}/issues?state=all`).catch(() => [])
+    const tasks: Task[] = []
+    for (const iss of issuesList || []) {
+      for (const t of iss.tasks || []) {
+        tasks.push(t)
+      }
+    }
+    allTasksList.value = tasks
+  } catch {}
+}
+
+watch(
+  () => [props.targetType, props.task?.id, props.projectId],
+  () => {
+    if (props.targetType === 'task') {
+      loadSprintsAndDependencies()
+      loadAllProjectTasks()
+    }
+  },
+  { immediate: true }
+)
+
+const predecessorDeps = computed(() => {
+  if (props.targetType !== 'task' || !targetId.value) return []
+  return projectDependencies.value.filter(d => d.successor_id === targetId.value)
+})
+
+const successorDeps = computed(() => {
+  if (props.targetType !== 'task' || !targetId.value) return []
+  return projectDependencies.value.filter(d => d.predecessor_id === targetId.value)
+})
+
+const availablePredecessorTasks = computed(() => {
+  return allTasksList.value.filter(t => t.id !== targetId.value && !predecessorDeps.value.some(d => d.predecessor_id === t.id))
+})
+
+const availableSuccessorTasks = computed(() => {
+  return allTasksList.value.filter(t => t.id !== targetId.value && !successorDeps.value.some(d => d.successor_id === t.id))
+})
+
+function getTaskTitle(taskId: string): string {
+  const found = allTasksList.value.find(t => t.id === taskId)
+  return found ? found.title : taskId.slice(0, 8)
+}
+
+async function createDependency(direction: 'predecessor' | 'successor') {
+  if (!targetId.value || isAddingDep.value) return
+  const predId = direction === 'predecessor' ? newPredecessorId.value : targetId.value
+  const succId = direction === 'predecessor' ? targetId.value : newSuccessorId.value
+  if (!predId || !succId) return
+
+  isAddingDep.value = true
+  try {
+    await apiFetch(`/projects/${props.projectId}/dependencies`, {
+      method: 'POST',
+      body: JSON.stringify({
+        predecessor_id: predId,
+        successor_id: succId,
+        dependency_type: newDepType.value,
+        lag_days: Number(newDepLag.value) || 0
+      })
+    })
+    notifyToast('依存関係を登録しました', 'success')
+    if (direction === 'predecessor') {
+      newPredecessorId.value = ''
+    } else {
+      newSuccessorId.value = ''
+    }
+    newDepLag.value = 0
+    await loadSprintsAndDependencies()
+    emit('updated')
+  } catch (e: any) {
+    notifyToast(e.message || '依存関係の作成に失敗しました（循環依存の可能性があります）', 'error')
+  } finally {
+    isAddingDep.value = false
+  }
+}
+
+async function removeDependency(depId: string) {
+  if (!confirm('この依存関係を解除しますか？')) return
+  try {
+    await apiFetch(`/projects/${props.projectId}/dependencies/${depId}`, {
+      method: 'DELETE'
+    })
+    notifyToast('依存関係を解除しました', 'success')
+    await loadSprintsAndDependencies()
+    emit('updated')
+  } catch (e: any) {
+    notifyToast(e.message || '依存関係の解除に失敗しました', 'error')
+  }
 }
 </script>
 

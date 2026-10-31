@@ -562,7 +562,10 @@ export function parseInvitationText(
 
     let isDomainAllowed = true
     if (allowedDomains && allowedDomains.length > 0) {
-      isDomainAllowed = allowedDomains.some(d => d.toLowerCase() === domain)
+      isDomainAllowed = allowedDomains.some(d => {
+        const cleanD = d.toLowerCase().trim().replace(/^@/, '').replace(/^\./, '')
+        return domain === cleanD || domain.endsWith('.' + cleanD)
+      })
     }
 
     const isDuplicateInBatch = seenEmails.has(lowerEmail)

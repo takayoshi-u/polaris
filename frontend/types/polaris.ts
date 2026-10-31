@@ -193,6 +193,8 @@ export interface Task {
   actual_hours?: number | null
   planned_cost?: number | null
   actual_cost?: number | null
+  sprint_id?: string | null
+  story_points?: number | null
   assignees: SubjectRef[]
   label_ids: string[]
   custom_values: Record<string, any>
@@ -293,4 +295,62 @@ export interface WebhookDelivery {
   error_message?: string | null
   created_at: string
 }
+
+export type DependencyType = 'FS' | 'SS' | 'FF' | 'SF'
+
+export interface TaskDependency {
+  id: string
+  project_id: string
+  predecessor_id: string
+  successor_id: string
+  dependency_type: DependencyType
+  lag_days: number
+  created_at: string
+}
+
+export interface Sprint {
+  id: string
+  project_id: string
+  name: string
+  goal?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  status: 'planned' | 'active' | 'closed'
+  task_count?: number
+  total_story_points?: number
+  total_planned_hours?: number
+  total_actual_hours?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface BurndownDataPoint {
+  date: string
+  ideal_story_points: number
+  remaining_story_points: number
+  ideal_hours: number
+  remaining_hours: number
+}
+
+export interface SprintBurndown {
+  sprint_id: string
+  sprint_name: string
+  start_date?: string | null
+  end_date?: string | null
+  total_story_points: number
+  total_hours: number
+  points: BurndownDataPoint[]
+}
+
+export interface ActivityLog {
+  id: string
+  project_id: string
+  user_id: string
+  entity_type: string
+  entity_id: string
+  action: string
+  details?: Record<string, any>
+  created_at: string
+}
+
 

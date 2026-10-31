@@ -16,6 +16,8 @@
       :templates="templates"
       :users="users"
       :groups="allGroups"
+      :sprints="sprints"
+      :all-tasks="allTasks"
       @close="closeDetailView"
       @updated="onDetailUpdated"
     />
@@ -46,21 +48,35 @@
           :class="activeTab === 'kanban' ? 'btn-primary' : 'btn-secondary'"
           @click="activeTab = 'kanban'"
         >
-          1. マトリクス・カンバン
+          📋 カンバン
         </button>
         <button
           class="btn"
           :class="activeTab === 'gantt' ? 'btn-primary' : 'btn-secondary'"
           @click="activeTab = 'gantt'"
         >
-          2. 予実ガントチャート
+          📊 ガント
         </button>
         <button
           class="btn"
           :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
           @click="activeTab = 'list'"
         >
-          3. 課題・タスク一覧
+          📑 リスト / テーブル
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'sprint' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'sprint'"
+        >
+          🏃 スプリント
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'workload' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'workload'"
+        >
+          👥 リソース負荷
         </button>
         <button
           v-if="project?.current_user_role === 'admin'"
@@ -68,14 +84,14 @@
           :class="activeTab === 'settings' ? 'btn-primary' : 'btn-secondary'"
           @click="activeTab = 'settings'"
         >
-          4. プロジェクト設定
+          ⚙️ プロジェクト設定
         </button>
       </div>
     </div>
 
     <!-- Common Filter Bar (Kanban / Gantt / List) -->
     <div
-      v-if="activeTab !== 'settings'"
+      v-if="activeTab !== 'settings' && activeTab !== 'sprint' && activeTab !== 'workload'"
       class="card"
       style="padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;"
     >
@@ -363,11 +379,25 @@
           </p>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
           <button class="btn btn-secondary btn-sm" @click="shiftTimeline(-7)">◀ -7日</button>
           <button class="btn btn-secondary btn-sm" @click="resetTimelineToday">今日へ</button>
           <button class="btn btn-primary btn-sm" @click="scrollToToday">📍 今日</button>
           <button class="btn btn-secondary btn-sm" @click="shiftTimeline(7)">+7日 ▶</button>
+
+          <!-- Auto-scheduling Toggle -->
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-color);">
+            <input type="checkbox" v-model="autoScheduleEnabled" />
+            <span :style="{ color: autoScheduleEnabled ? 'var(--primary)' : 'var(--text-muted)', fontWeight: autoScheduleEnabled ? '700' : 'normal' }">
+              ⚡ オートスケジューリング
+            </span>
+          </label>
+
+          <!-- Dependencies Line Toggle -->
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-color);">
+            <input type="checkbox" v-model="showDependencyLines" />
+            <span>🔗 依存関係線 ({{ ganttDependencyLines.length }})</span>
+          </label>
 
           <div style="display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border-color);">
             <button class="btn btn-sm" :class="ganttScale === 'day' ? 'btn-primary' : 'btn-ghost'" @click="ganttScale = 'day'">日</button>
@@ -462,6 +492,45 @@
                 今日
               </div>
             </div>
+
+            <!-- SVG Dependency Arrows Overlay Layer -->
+            <svg
+              v-if="showDependencyLines && ganttDependencyLines.length > 0"
+              style="
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 5;
+              "
+            >
+              <defs>
+                <marker
+                  id="gantt-dep-arrow"
+                  viewBox="0 0 10 10"
+                  refX="6"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb" />
+                </marker>
+              </defs>
+              <g v-for="depLine in ganttDependencyLines" :key="depLine.id">
+                <path
+                  :d="depLine.path"
+                  fill="none"
+                  stroke="#2563eb"
+                  stroke-width="1.8"
+                  marker-end="url(#gantt-dep-arrow)"
+                >
+                  <title>{{ depLine.tooltip }}</title>
+                </path>
+              </g>
+            </svg>
 
             <!-- 2-Tier Date Header -->
             <div class="gantt-row" style="height: 44px; background: var(--bg-elevated); display: flex; flex-direction: column; padding: 0;">
@@ -611,37 +680,44 @@
       </div>
     </section>
 
-    <!-- VIEW 3: HIERARCHY LIST -->
-    <section v-if="activeTab === 'list'" class="card" style="display: flex; flex-direction: column; gap: 12px;">
-      <h2 style="font-size: 15px; font-weight: 700;">課題 ＞ タスク 階層一覧</h2>
-      <div v-for="iss in issues" :key="`list-${iss.id}`" style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
-        <div
-          style="padding: 10px 14px; background: var(--bg-card-hover); display: flex; justify-content: space-between; align-items: center; cursor: pointer;"
-          @click="openIssueDetail(iss)"
-        >
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span :class="['badge', iss.state === 'open' ? 'badge-green' : 'badge-slate']">{{ iss.state.toUpperCase() }}</span>
-            <strong style="color: var(--primary);">{{ iss.title }}</strong>
-          </div>
-          <div style="font-size: 12px; color: var(--text-muted);">
-            予定: {{ formatHours(iss.rollup.total_planned_hours) }}h / 実績: {{ formatHours(iss.rollup.total_actual_hours) }}h ・ コスト(予/実): {{ formatCost(iss.rollup.total_planned_cost) }} / {{ formatCost(iss.rollup.total_actual_cost) }} ・ 進捗: {{ iss.rollup.weighted_progress.toFixed(1) }}%
-          </div>
-        </div>
-        <div
-          v-for="t in iss.tasks || []"
-          :key="`list-t-${t.id}`"
-          style="padding: 8px 14px 8px 28px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px; cursor: pointer;"
-          @click="openTaskDetail(t, iss)"
-        >
-          <span>├ {{ t.title }}</span>
-          <div style="display: flex; align-items: center; gap: 12px; color: var(--text-muted);">
-            <span>{{ getStatusName(t.status_id) }}</span>
-            <span>予: {{ formatHours(t.planned_hours) }}h / 実: {{ formatHours(t.actual_hours) }}h</span>
-            <span>コスト(予/実): {{ formatCost(t.planned_cost) }} / {{ formatCost(t.actual_cost) }}</span>
-            <span class="badge badge-blue">{{ t.progress }}%</span>
-          </div>
-        </div>
-      </div>
+    <!-- VIEW 3: SPREADSHEET LIST / TABLE VIEW -->
+    <section v-if="activeTab === 'list'">
+      <TaskTableView
+        :project-id="projectId"
+        :issues="issues"
+        :statuses="statuses"
+        :users="users"
+        :can-edit="canEditProjectItems"
+        @open-issue="openIssueDetail"
+        @open-task="openTaskDetail"
+        @refresh="refreshAllWorkspace"
+      />
+    </section>
+
+    <!-- VIEW 4: SPRINT MANAGEMENT VIEW -->
+    <section v-if="activeTab === 'sprint'">
+      <SprintBoardView
+        :project-id="projectId"
+        :sprints="sprints"
+        :all-tasks="allTasks"
+        :statuses="statuses"
+        :can-edit="canEditProjectItems"
+        @open-task="openTaskDetailStandalone"
+        @refresh="refreshAllWorkspace"
+      />
+    </section>
+
+    <!-- VIEW 5: RESOURCE WORKLOAD VIEW -->
+    <section v-if="activeTab === 'workload'">
+      <ResourceWorkloadView
+        :project-id="projectId"
+        :hours-per-day="project?.hours_per_day || 8.0"
+        :all-tasks="allTasks"
+        :users="users"
+        :members="members"
+        :issues="issues"
+        @open-task="openTaskDetail"
+      />
     </section>
 
     <!-- VIEW 4: PROJECT SETTINGS & TEMPLATE BUILDER (Admin Role) -->
@@ -1120,23 +1196,34 @@ import type {
   Label,
   Project,
   ProjectMember,
+  Sprint,
   Status,
   TargetType,
   Task,
+  TaskDependency,
   Template,
   TemplateRow,
   User,
   Webhook,
   WebhookDelivery
 } from '~/types/polaris'
-import { addDaysYMD, calcGanttBarPosition, formatCost, formatHours, generateDateRangeYMD, hasAtMostTwoDecimals } from '~/utils/format'
+import {
+  addDaysYMD,
+  calcGanttBarPosition,
+  calculateAutoScheduleUpdates,
+  calculateGanttDependencyPath,
+  formatCost,
+  formatHours,
+  generateDateRangeYMD,
+  hasAtMostTwoDecimals
+} from '~/utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const { apiFetch, notifyToast, refreshProjects } = useApi()
 
 const projectId = computed(() => route.params.id as string)
-const activeTab = ref<'kanban' | 'gantt' | 'list' | 'settings'>('kanban')
+const activeTab = ref<'kanban' | 'gantt' | 'list' | 'sprint' | 'workload' | 'settings'>('kanban')
 
 const project = ref<Project | null>(null)
 const statuses = ref<Status[]>([])
@@ -1149,6 +1236,101 @@ const projectGroups = ref<Group[]>([])
 const globalGroups = ref<Group[]>([])
 const users = ref<User[]>([])
 const issues = ref<Issue[]>([])
+const sprints = ref<Sprint[]>([])
+const dependencies = ref<TaskDependency[]>([])
+
+const autoScheduleEnabled = ref(true)
+const showDependencyLines = ref(true)
+
+const allTasks = computed<Task[]>(() => {
+  const list: Task[] = []
+  for (const iss of issues.value) {
+    for (const t of iss.tasks || []) {
+      list.push(t)
+    }
+  }
+  return list
+})
+
+const ganttDependencyLines = computed(() => {
+  if (!showDependencyLines.value || dependencies.value.length === 0) return []
+
+  let currentRowIndex = 0
+  const taskRowYMap = new Map<string, number>()
+
+  for (const iss of issues.value) {
+    currentRowIndex++
+    for (const t of iss.tasks || []) {
+      const topY = 44 + (currentRowIndex * 62)
+      taskRowYMap.set(t.id, topY + 20)
+      currentRowIndex++
+    }
+  }
+
+  const lines: { id: string; path: string; tooltip: string }[] = []
+  for (const dep of dependencies.value) {
+    const fromY = taskRowYMap.get(dep.predecessor_id)
+    const toY = taskRowYMap.get(dep.successor_id)
+    if (fromY === undefined || toY === undefined) continue
+
+    const predTask = allTasks.value.find(t => t.id === dep.predecessor_id)
+    const succTask = allTasks.value.find(t => t.id === dep.successor_id)
+    if (!predTask || !succTask) continue
+    if (!predTask.planned_start_date || !predTask.planned_end_date) continue
+    if (!succTask.planned_start_date || !succTask.planned_end_date) continue
+
+    const predPos = getBarPos(predTask.planned_start_date, predTask.planned_end_date)
+    const succPos = getBarPos(succTask.planned_start_date, succTask.planned_end_date)
+    if (!predPos.visible && !succPos.visible) continue
+
+    const fromX = predPos.leftPx + predPos.widthPx
+    const toX = succPos.leftPx
+
+    const path = calculateGanttDependencyPath(fromX, fromY, toX, toY)
+    const tooltip = `${predTask.title} ➔ ${succTask.title} (${dep.dependency_type || 'FS'}${dep.lag_days ? ` +${dep.lag_days}d` : ''})`
+    lines.push({
+      id: dep.id,
+      path,
+      tooltip
+    })
+  }
+  return lines
+})
+
+async function triggerAutoSchedule(changedTaskId: string, newEndDate: string) {
+  if (!autoScheduleEnabled.value || dependencies.value.length === 0) return
+  const updates = calculateAutoScheduleUpdates(changedTaskId, newEndDate, dependencies.value, allTasks.value)
+  if (updates.length === 0) return
+
+  try {
+    await Promise.all(
+      updates.map(u =>
+        apiFetch(`/projects/${projectId.value}/tasks/${u.taskId}/gantt-dates`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            planned_start_date: u.planned_start_date,
+            planned_end_date: u.planned_end_date
+          })
+        })
+      )
+    )
+    notifyToast(`⚡ オートスケジューリング: 後続 ${updates.length} 件の予定期間を自動スライド調整しました`, 'info')
+  } catch (err: any) {
+    console.error('Auto schedule update error:', err)
+  }
+}
+
+function openTaskDetailStandalone(t: Task) {
+  let parentIss = issues.value.find(i => (i.tasks || []).some(x => x.id === t.id))
+  if (!parentIss && t.issue_id) {
+    parentIss = issues.value.find(i => i.id === t.issue_id)
+  }
+  openTaskDetail(t, parentIss || ({ id: t.issue_id, title: '親課題' } as any))
+}
+
+async function refreshAllWorkspace() {
+  await Promise.all([loadIssues(), loadWorkspace(), refreshProjects()])
+}
 
 const canEditProjectItems = computed(() => {
   return project.value?.current_user_role === 'admin' || project.value?.current_user_role === 'editor'
@@ -1475,7 +1657,7 @@ async function openTargetFromQuery(raw: string) {
 async function loadWorkspace() {
   if (!projectId.value) return
   try {
-    const [p, sts, pLabels, sLabels, cfs, tpls, mems, pGrps, gGrps, usrs] = await Promise.all([
+    const [p, sts, pLabels, sLabels, cfs, tpls, mems, pGrps, gGrps, usrs, sps, deps] = await Promise.all([
       apiFetch<Project>(`/projects/${projectId.value}`),
       apiFetch<Status[]>(`/projects/${projectId.value}/statuses`),
       apiFetch<Label[]>(`/projects/${projectId.value}/labels`),
@@ -1485,7 +1667,9 @@ async function loadWorkspace() {
       apiFetch<ProjectMember[]>(`/projects/${projectId.value}/members`),
       apiFetch<Group[]>(`/projects/${projectId.value}/groups`),
       apiFetch<Group[]>('/groups'),
-      apiFetch<User[]>('/users')
+      apiFetch<User[]>('/users'),
+      apiFetch<Sprint[]>(`/projects/${projectId.value}/sprints`).catch(() => []),
+      apiFetch<TaskDependency[]>(`/projects/${projectId.value}/dependencies`).catch(() => [])
     ])
     project.value = p
     statuses.value = (sts || []).sort((a, b) => a.display_order - b.display_order)
@@ -1497,6 +1681,8 @@ async function loadWorkspace() {
     projectGroups.value = pGrps || []
     globalGroups.value = gGrps || []
     users.value = usrs || []
+    sprints.value = sps || []
+    dependencies.value = deps || []
 
     projForm.name = p.name
     projForm.description = p.description
@@ -1687,6 +1873,9 @@ function startGanttBarDrag(
         method: 'PATCH',
         body: JSON.stringify(payload)
       })
+      if (barType === 'planned' && autoScheduleEnabled.value && task.planned_end_date) {
+        await triggerAutoSchedule(task.id, task.planned_end_date)
+      }
       await loadIssues()
     } catch (e: any) {
       notifyToast(e.message, 'error')
@@ -1717,6 +1906,9 @@ async function onCellMouseUpCreate(task: Task, ymd: string) {
       })
     })
     notifyToast(`予定期間 (${s} 〜 ${e}) を作成しました`, 'success')
+    if (autoScheduleEnabled.value) {
+      await triggerAutoSchedule(task.id, e)
+    }
     await loadIssues()
   } catch (err: any) {
     notifyToast(err.message, 'error')
@@ -1860,6 +2052,10 @@ function closeDetailView() {
 
 async function onDetailUpdated() {
   await Promise.all([loadIssues(), loadWorkspace(), refreshProjects()])
+  if (detailModalState.targetType === 'task' && detailModalState.task?.planned_end_date && autoScheduleEnabled.value) {
+    await triggerAutoSchedule(detailModalState.task.id, detailModalState.task.planned_end_date)
+    await loadIssues()
+  }
   if (detailModalState.targetType === 'issue' && detailModalState.issue) {
     const updated = issues.value.find(i => i.id === detailModalState.issue?.id)
     if (updated) detailModalState.issue = updated

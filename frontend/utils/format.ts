@@ -131,3 +131,269 @@ export function renderSafeMarkdown(mdText?: string | null): string {
   return rawHtml
 }
 
+export interface AutoScheduleUpdate {
+  taskId: string
+  planned_start_date: string
+  planned_end_date: string
+}
+
+/**
+ * Calculates cascading schedule updates for downstream successor tasks
+ * when a predecessor task's planned end date changes.
+ * Prevents cyclic loops with a visited set.
+ */
+export function calculateAutoScheduleUpdates(
+  changedTaskId: string,
+  newPlannedEndDate: string,
+  dependencies: { predecessor_id: string; successor_id: string; dependency_type?: string; lag_days?: number }[],
+  allTasks: { id: string; planned_start_date?: string | null; planned_end_date?: string | null }[]
+): AutoScheduleUpdate[] {
+  const taskMap = new Map<string, { id: string; planned_start_date?: string | null; planned_end_date?: string | null }>()
+  for (const t of allTasks) {
+    taskMap.set(t.id, t)
+  }
+
+  // Predecessor -> Successor dependencies map
+  const succMap = new Map<string, typeof dependencies>()
+  for (const d of dependencies) {
+    if (!succMap.has(d.predecessor_id)) {
+      succMap.set(d.predecessor_id, [])
+    }
+    succMap.get(d.predecessor_id)!.push(d)
+  }
+
+  const updates = new Map<string, AutoScheduleUpdate>()
+  const visited = new Set<string>()
+
+  function propagate(currentId: string, currentEndDate: string) {
+    if (visited.has(currentId)) return
+    visited.add(currentId)
+
+    const deps = succMap.get(currentId) || []
+    for (const dep of deps) {
+      const succTask = taskMap.get(dep.successor_id)
+      if (!succTask || !succTask.planned_start_date || !succTask.planned_end_date) continue
+
+      const depType = dep.dependency_type || 'FS'
+      if (depType === 'FS') {
+        const minStartDate = addDaysYMD(currentEndDate, 1 + (dep.lag_days || 0))
+        const existingUpdate = updates.get(succTask.id)
+        const currentSuccStart = existingUpdate ? existingUpdate.planned_start_date : succTask.planned_start_date
+
+        if (currentSuccStart < minStartDate) {
+          const durationDays = Math.max(diffDaysYMD(succTask.planned_start_date, succTask.planned_end_date), 0)
+          const newStart = minStartDate
+          const newEnd = addDaysYMD(newStart, durationDays)
+
+          updates.set(succTask.id, {
+            taskId: succTask.id,
+            planned_start_date: newStart,
+            planned_end_date: newEnd
+          })
+
+          propagate(succTask.id, newEnd)
+        }
+      }
+    }
+    visited.delete(currentId)
+  }
+
+  propagate(changedTaskId, newPlannedEndDate)
+  return Array.from(updates.values())
+}
+
+/**
+ * Computes an SVG orthogonal routing path from predecessor bar end to successor bar start.
+ */
+export function calculateGanttDependencyPath(
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): string {
+  if (toX >= fromX + 16) {
+    const midX = Math.round(fromX + (toX - fromX) / 2)
+    return `M ${fromX} ${fromY} L ${midX} ${fromY} L ${midX} ${toY} L ${toX} ${toY}`
+  }
+
+  const leadX = fromX + 12
+  const midY = Math.round((fromY + toY) / 2)
+  const backX = toX - 12
+  return `M ${fromX} ${fromY} L ${leadX} ${fromY} L ${leadX} ${midY} L ${backX} ${midY} L ${backX} ${toY} L ${toX} ${toY}`
+}
+
+export interface WeekPeriod {
+  start: string // YYYY-MM-DD
+  end: string   // YYYY-MM-DD
+  label: string
+}
+
+export interface TaskWorkloadContribution {
+  taskId: string
+  taskTitle: string
+  issueTitle?: string
+  totalPlannedHours: number
+  allocatedHours: number
+  plannedStartDate?: string | null
+  plannedEndDate?: string | null
+}
+
+export interface MemberWeekWorkload {
+  userId: string
+  week: WeekPeriod
+  capacityHours: number
+  allocatedHours: number
+  ratioPercent: number
+  status: 'low' | 'optimal' | 'overload'
+  contributions: TaskWorkloadContribution[]
+}
+
+/**
+ * Generates an array of WeekPeriod starting from the Monday of a given reference date.
+ */
+export function generateWeeksList(referenceYMD: string, weekCount = 6): WeekPeriod[] {
+  const parts = referenceYMD.split('-').map(Number)
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
+  const dayOfWeek = dt.getUTCDay()
+  // Monday is 1, Sunday is 0 -> offset to preceding Monday
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+  dt.setUTCDate(dt.getUTCDate() + diffToMonday)
+
+  const weeks: WeekPeriod[] = []
+  for (let i = 0; i < weekCount; i++) {
+    const y = dt.getUTCFullYear()
+    const m = String(dt.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(dt.getUTCDate()).padStart(2, '0')
+    const startYMD = `${y}-${m}-${d}`
+
+    const endDt = new Date(dt.getTime())
+    endDt.setUTCDate(endDt.getUTCDate() + 6)
+    const ey = endDt.getUTCFullYear()
+    const em = String(endDt.getUTCMonth() + 1).padStart(2, '0')
+    const ed = String(endDt.getUTCDate()).padStart(2, '0')
+    const endYMD = `${ey}-${em}-${ed}`
+
+    weeks.push({
+      start: startYMD,
+      end: endYMD,
+      label: `${parseInt(m, 10)}/${parseInt(d, 10)}〜`
+    })
+
+    dt.setUTCDate(dt.getUTCDate() + 7)
+  }
+  return weeks
+}
+
+/**
+ * Calculates the number of working days (Mon-Fri) between two YYYY-MM-DD dates inclusive.
+ */
+export function countBusinessDays(startYMD: string, endYMD: string): number {
+  if (startYMD > endYMD) return 0
+  let count = 0
+  let cur = startYMD
+  while (cur <= endYMD) {
+    const parts = cur.split('-').map(Number)
+    const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
+    const dow = dt.getUTCDay()
+    if (dow !== 0 && dow !== 6) {
+      count++
+    }
+    cur = addDaysYMD(cur, 1)
+  }
+  return count
+}
+
+/**
+ * Computes member workloads across specified weeks.
+ */
+export function calculateMemberWorkloads(
+  userIds: string[],
+  tasks: {
+    id: string
+    title: string
+    planned_hours?: number | null
+    planned_start_date?: string | null
+    planned_end_date?: string | null
+    assignees?: { type: string; id: string }[]
+  }[],
+  weeks: WeekPeriod[],
+  hoursPerDay = 8.0,
+  taskParentMap?: Map<string, string>
+): Map<string, MemberWeekWorkload[]> {
+  const result = new Map<string, MemberWeekWorkload[]>()
+  const capacityHours = Math.round(hoursPerDay * 5 * 100) / 100
+
+  for (const uid of userIds) {
+    const userWeeks: MemberWeekWorkload[] = []
+    const userTasks = tasks.filter(t => t.assignees?.some(a => a.type === 'user' && a.id === uid))
+
+    for (const wk of weeks) {
+      let allocatedTotal = 0
+      const contributions: TaskWorkloadContribution[] = []
+
+      for (const t of userTasks) {
+        if (!t.planned_start_date || !t.planned_end_date) continue
+        const tStart = t.planned_start_date
+        const tEnd = t.planned_end_date
+        const pHours = Number(t.planned_hours) || 0
+        if (pHours <= 0) continue
+
+        // Check date overlap
+        const overlapStart = tStart > wk.start ? tStart : wk.start
+        const overlapEnd = tEnd < wk.end ? tEnd : wk.end
+        if (overlapStart > overlapEnd) continue
+
+        const totalBusinessDays = countBusinessDays(tStart, tEnd)
+        const overlapBusinessDays = countBusinessDays(overlapStart, overlapEnd)
+
+        let taskHoursForWeek = 0
+        if (totalBusinessDays > 0) {
+          taskHoursForWeek = (overlapBusinessDays / totalBusinessDays) * pHours
+        } else {
+          const totalDays = Math.max(diffDaysYMD(tStart, tEnd) + 1, 1)
+          const overlapDays = Math.max(diffDaysYMD(overlapStart, overlapEnd) + 1, 0)
+          taskHoursForWeek = (overlapDays / totalDays) * pHours
+        }
+
+        taskHoursForWeek = Math.round(taskHoursForWeek * 100) / 100
+        if (taskHoursForWeek > 0) {
+          allocatedTotal += taskHoursForWeek
+          contributions.push({
+            taskId: t.id,
+            taskTitle: t.title,
+            issueTitle: taskParentMap?.get(t.id),
+            totalPlannedHours: pHours,
+            allocatedHours: taskHoursForWeek,
+            plannedStartDate: t.planned_start_date,
+            plannedEndDate: t.planned_end_date
+          })
+        }
+      }
+
+      allocatedTotal = Math.round(allocatedTotal * 100) / 100
+      const ratio = capacityHours > 0 ? (allocatedTotal / capacityHours) * 100 : 0
+      let status: 'low' | 'optimal' | 'overload' = 'low'
+      if (ratio > 100) {
+        status = 'overload'
+      } else if (ratio >= 80) {
+        status = 'optimal'
+      }
+
+      userWeeks.push({
+        userId: uid,
+        week: wk,
+        capacityHours,
+        allocatedHours: allocatedTotal,
+        ratioPercent: Math.round(ratio * 10) / 10,
+        status,
+        contributions
+      })
+    }
+
+    result.set(uid, userWeeks)
+  }
+
+  return result
+}
+
+

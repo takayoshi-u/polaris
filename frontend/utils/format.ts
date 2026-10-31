@@ -493,4 +493,100 @@ export function calculateMemberWorkloads(
   return result
 }
 
+export interface ParsedInviteRow {
+  email: string
+  displayName: string
+  domain: string
+  isDomainAllowed: boolean
+  isDuplicateInBatch: boolean
+  isAlreadyRegistered: boolean
+  isValidEmailFormat: boolean
+}
+
+/**
+ * Parses multi-line invitation text or CSV/TSV data into structured invitation rows,
+ * verifying against allowed domains and existing users.
+ */
+export function parseInvitationText(
+  text: string,
+  allowedDomains: string[] = [],
+  existingEmails: Set<string> = new Set()
+): ParsedInviteRow[] {
+  if (!text || !text.trim()) return []
+
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
+  if (lines.length === 0) return []
+
+  const results: ParsedInviteRow[] = []
+  const seenEmails = new Set<string>()
+
+  // Skip header line if detected
+  let startIndex = 0
+  const firstLine = lines[0].toLowerCase()
+  if (
+    firstLine.includes('email') ||
+    firstLine.includes('メール') ||
+    firstLine.startsWith('mail,') ||
+    firstLine.startsWith('address,')
+  ) {
+    startIndex = 1
+  }
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i]
+    let email = ''
+    let displayName = ''
+
+    let parts: string[] = []
+    if (line.includes('\t')) {
+      parts = line.split('\t')
+    } else if (line.includes(',')) {
+      parts = line.split(',')
+    } else if (line.includes(';')) {
+      parts = line.split(';')
+    } else {
+      parts = [line]
+    }
+
+    email = parts[0].trim().replace(/^["']|["']$/g, '')
+    if (parts.length > 1) {
+      displayName = parts.slice(1).join(' ').trim().replace(/^["']|["']$/g, '')
+    }
+
+    if (!email) continue
+
+    const lowerEmail = email.toLowerCase()
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const isValidFormat = emailRegex.test(lowerEmail)
+    const domain = lowerEmail.includes('@') ? lowerEmail.split('@')[1].trim() : ''
+
+    let isDomainAllowed = true
+    if (allowedDomains && allowedDomains.length > 0) {
+      isDomainAllowed = allowedDomains.some(d => d.toLowerCase() === domain)
+    }
+
+    const isDuplicateInBatch = seenEmails.has(lowerEmail)
+    seenEmails.add(lowerEmail)
+
+    const isAlreadyRegistered = existingEmails.has(lowerEmail)
+
+    if (!displayName && domain) {
+      displayName = lowerEmail.split('@')[0]
+    }
+
+    results.push({
+      email,
+      displayName,
+      domain,
+      isDomainAllowed,
+      isDuplicateInBatch,
+      isAlreadyRegistered,
+      isValidEmailFormat: isValidFormat
+    })
+  }
+
+  return results
+}
+
+
 

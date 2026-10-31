@@ -923,6 +923,13 @@
             <option value="checkbox">チェックボックス</option>
             <option value="user_group">ユーザー/グループ</option>
           </select>
+          <input
+            v-if="['select', 'radio', 'checkbox'].includes(sysCfForm.field_type)"
+            v-model="sysCfForm.options_csv"
+            type="text"
+            style="width: 100%;"
+            placeholder="選択肢（カンマ区切り: A, B, C）"
+          />
           <button type="submit" class="btn btn-primary btn-sm">追加</button>
         </form>
 
@@ -937,6 +944,9 @@
                 {{ cf.target_type === 'issue' ? '課題' : 'タスク' }}
               </span>
               <strong>{{ cf.name }}</strong> ({{ cf.field_type }})
+              <span v-if="cf.options && cf.options.length > 0" style="color: var(--text-muted); margin-left: 4px; font-size: 11px;">
+                [{{ cf.options.join(', ') }}]
+              </span>
             </span>
             <button class="btn btn-danger btn-sm" @click="deleteSystemCustomField(cf.id)">削除</button>
           </div>
@@ -1611,7 +1621,8 @@ const sysStatusForm = reactive({
 const sysCfForm = reactive({
   target_type: 'issue' as TargetType,
   name: '',
-  field_type: 'text_single'
+  field_type: 'text_single',
+  options_csv: ''
 })
 
 onMounted(async () => {
@@ -1981,6 +1992,9 @@ async function deleteSystemStatus(id: string) {
 }
 
 async function createSystemCustomField() {
+  const options = sysCfForm.options_csv
+    ? sysCfForm.options_csv.split(',').map(s => s.trim()).filter(Boolean)
+    : []
   try {
     await apiFetch('/system/custom-fields', {
       method: 'POST',
@@ -1988,10 +2002,11 @@ async function createSystemCustomField() {
         target_type: sysCfForm.target_type,
         name: sysCfForm.name,
         field_type: sysCfForm.field_type,
-        options: []
+        options
       })
     })
     sysCfForm.name = ''
+    sysCfForm.options_csv = ''
     await loadAdminData()
     notifyToast('デフォルトカスタム属性を追加しました', 'success')
   } catch (e: any) {

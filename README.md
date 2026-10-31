@@ -9,6 +9,7 @@
 - **[確定仕様書 (`docs/specification.md`)](docs/specification.md)** — システム全体のドメインルール、権限モデル、画面・機能仕様
 - **[ER図・テーブル定義書 (`docs/er.md`)](docs/er.md)** — PostgreSQL 17 データベースの Mermaid ER図および全 29 テーブルの定義（全主キー UUID v7）
 - **[OpenAPI 3.0.3 仕様書 (`docs/openapi.yaml`)](docs/openapi.yaml)** — バックエンド REST API（`/api/v1`）の全エンドポイント・リクエスト／レスポンススキーマ定義
+- **[エージェント開発規約・PR運用規程 (`AGENTS.md`)](AGENTS.md)** — Git ブランチ戦略、Pull Request 運用ルール、エージェントチーム役割分担
 
 ---
 
@@ -38,6 +39,7 @@
 ```text
 .
 ├── README.md
+├── AGENTS.md                        # エージェント開発規約・Git/PR ワークフロー規程
 ├── docker-compose.yml               # PostgreSQL 17 + Go API + Nuxt 3 Web + Mailpit
 ├── docs/
 │   ├── specification.md             # システム全体確定仕様書
@@ -154,3 +156,17 @@ go vet -C backend ./...
 ```bash
 node --test frontend/tests/format.test.mjs
 ```
+
+---
+
+## 開発・コントリビューション規約 (Git / PR ワークフロー)
+
+プロジェクトへの変更・コミットを行う際は、以下のワークフロー規程を厳格に遵守してください。詳細なエージェント役割分担および規約は [`AGENTS.md`](AGENTS.md) を参照してください。
+
+1. **`main` ブランチ直接コミット・プッシュの禁止**:
+   - 必ず目的別のフィーチャーブランチ（`feat/*`, `fix/*`, `docs/*`, `chore/*` 等）を作成して作業を行ってください。
+2. **Pull Request 必須**:
+   - 作業ブランチをプッシュ後、GitHub CLI (`gh pr create`) または Web UI から Pull Request を作成してください。
+3. **レビュー・承認プロセス**:
+   - 単体テスト・ビルドの完全通過、テスターペルソナ受入検証、およびレビュアーの承認（`APPROVE`）を経てからマージ（`gh pr merge --merge`）を実施してください。
+

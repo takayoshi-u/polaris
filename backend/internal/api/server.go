@@ -108,6 +108,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/users", s.requireAuth(s.handleListUsers))
 	s.mux.HandleFunc("POST /api/v1/users", s.requireSystemPerm(domain.PermManageSystem, s.handleCreateUser))
 	s.mux.HandleFunc("POST /api/v1/users/invite", s.requireSystemPerm(domain.PermManageSystem, s.handleInviteUser))
+	s.mux.HandleFunc("POST /api/v1/users/bulk-invite", s.requireSystemPerm(domain.PermManageSystem, s.handleBulkInviteUsers))
 	s.mux.HandleFunc("POST /api/v1/users/{userId}/resend-invite", s.requireSystemPerm(domain.PermManageSystem, s.handleResendInvite))
 	s.mux.HandleFunc("PUT /api/v1/users/{userId}/email", s.requireSystemPerm(domain.PermManageSystem, s.handleAdminChangeUserEmail))
 	s.mux.HandleFunc("PUT /api/v1/users/{userId}/status", s.requireSystemPerm(domain.PermManageSystem, s.handleUpdateUserStatus))

@@ -1006,6 +1006,60 @@ components:
           items:
             type: string
 
+    UserInviteItem:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+
+    BulkInviteRequest:
+      type: object
+      required: [invitations]
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserInviteItem'
+        default_group_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        default_permissions:
+          type: array
+          items:
+            type: string
+
+    BulkInviteFailure:
+      type: object
+      properties:
+        email:
+          type: string
+        reason:
+          type: string
+
+    BulkInviteResult:
+      type: object
+      properties:
+        total:
+          type: integer
+        invited_count:
+          type: integer
+        failed_count:
+          type: integer
+        invited_users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkInviteFailure'
+
 paths:
   /health:
     get:
@@ -1250,6 +1304,27 @@ paths:
       responses:
         '201':
           description: 招待作成完了
+
+  /users/bulk-invite:
+    post:
+      summary: 複数ユーザーの一括招待（manage_system権限必須・ドメイン制限・既存重複検証適用）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkInviteRequest'
+      responses:
+        '200':
+          description: 一括招待結果（成功ユーザー一覧および失敗理由一覧）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkInviteResult'
+        '400':
+          description: 不正なリクエストボディ
+        '403':
+          description: 権限不足
 
   /users/{userId}/resend-invite:
     post:

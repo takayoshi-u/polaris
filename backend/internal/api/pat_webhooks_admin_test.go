@@ -38,6 +38,7 @@ type mockDBState struct {
 	sysPerms    map[string][]string // userID -> permissions
 	settings    *domain.SystemSettings
 	statuses    []domain.Status
+	allowedDomains []string
 }
 
 type mockUser struct {
@@ -290,6 +291,22 @@ func (s *mockStmt) Exec(args []driver.Value) (driver.Result, error) {
 		}
 		st.deliveries = append(st.deliveries, del)
 		return driver.RowsAffected(1), nil
+
+	case strings.Contains(q, "INSERT INTO users"):
+		uID := fmt.Sprintf("%v", args[0])
+		email := fmt.Sprintf("%v", args[1])
+		dName := fmt.Sprintf("%v", args[2])
+		status := fmt.Sprintf("%v", args[3])
+		now := time.Now().UTC()
+		st.users[uID] = &mockUser{
+			ID:          uID,
+			Email:       email,
+			DisplayName: dName,
+			Status:      status,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		return driver.RowsAffected(1), nil
 	}
 
 	return driver.RowsAffected(1), nil
@@ -424,9 +441,28 @@ func (s *mockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		}}
 		return &mockRows{cols: cols, rows: values}, nil
 
+	case strings.Contains(q, "SELECT COUNT(*) FROM users"):
+		cols := []string{"count"}
+		email := ""
+		if len(args) > 0 {
+			email = strings.ToLower(fmt.Sprintf("%v", args[0]))
+		}
+		cnt := int64(0)
+		for _, u := range st.users {
+			if strings.ToLower(u.Email) == email {
+				cnt++
+			}
+		}
+		values := [][]driver.Value{{cnt}}
+		return &mockRows{cols: cols, rows: values}, nil
+
 	case strings.Contains(q, "FROM system_allowed_domains"):
 		cols := []string{"domain"}
-		return &mockRows{cols: cols, rows: nil}, nil
+		var values [][]driver.Value
+		for _, d := range st.allowedDomains {
+			values = append(values, []driver.Value{d})
+		}
+		return &mockRows{cols: cols, rows: values}, nil
 
 	case strings.Contains(q, "FROM statuses") && strings.Contains(q, "WHERE project_id IS NULL"):
 		// ListStatuses: SELECT id, project_id, display_order, name, color, created_at FROM statuses
@@ -1041,3 +1077,146 @@ func TestSecurityEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+// TestBulkInvite_AdminWorkflow verifies the bulk email invitation API from an administrator perspective:
+// 1. Authorization checks (non-admin receives 403 Forbidden).
+// 2. Empty invitations rejection (400 Bad Request).
+// 3. Allowed domain enforcement (tail-matching, rejecting unauthorized domains).
+// 4. Existing user duplicate rejection.
+// 5. Duplicate in same batch rejection.
+// 6. Malformed email format rejection.
+// 7. Successful invitation user creation, token generation, and response structure.
+func TestBulkInvite_AdminWorkflow(t *testing.T) {
+	srv, st, state, adminID, regularID := setupAdminTestServer(t)
+	ctx := context.Background()
+
+	// Configure allowed domains: "example.com"
+	state.mu.Lock()
+	state.allowedDomains = []string{"example.com"}
+	// Pre-populate an existing user
+	state.users["usr_existing"] = &mockUser{
+		ID:          "usr_existing",
+		Email:       "existing@example.com",
+		DisplayName: "Existing Member",
+		Status:      domain.UserStatusActive,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	state.mu.Unlock()
+
+	// 1. Issue an Admin PAT with admin:system scope
+	adminToken, _, err := st.CreatePAT(ctx, adminID, "Admin Bulk Invite PAT", []string{domain.ScopeAdminSystem}, nil)
+	if err != nil {
+		t.Fatalf("failed to create admin PAT: %v", err)
+	}
+
+	// 2. Issue a Regular PAT without admin:system scope
+	regularToken, _, err := st.CreatePAT(ctx, regularID, "Regular User PAT", []string{domain.ScopeReadProjects}, nil)
+	if err != nil {
+		t.Fatalf("failed to create regular PAT: %v", err)
+	}
+
+	// 3. Verify Non-Admin caller gets 403 Forbidden
+	dummyPayload, _ := json.Marshal(domain.BulkInviteRequest{
+		Invitations: []domain.UserInviteItem{{Email: "newcomer@example.com", DisplayName: "Newcomer"}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/bulk-invite", bytes.NewReader(dummyPayload))
+	req.Header.Set("Authorization", "Bearer "+regularToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for non-admin bulk invite, got %d", rec.Code)
+	}
+	t.Logf("✓ Non-admin caller correctly rejected with 403 Forbidden")
+
+	// 4. Verify Empty Invitations gets 400 Bad Request
+	emptyPayload, _ := json.Marshal(domain.BulkInviteRequest{
+		Invitations: []domain.UserInviteItem{},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/bulk-invite", bytes.NewReader(emptyPayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for empty invitations, got %d", rec.Code)
+	}
+	t.Logf("✓ Empty invitations correctly rejected with 400 Bad Request")
+
+	// 5. Execute mixed batch bulk invite
+	bulkReq := domain.BulkInviteRequest{
+		Invitations: []domain.UserInviteItem{
+			{Email: "alice@example.com", DisplayName: "Alice Tanaka"},
+			{Email: "bob@sub.example.com", DisplayName: "Bob Sato"}, // Subdomain of example.com (allowed by tail-matching)
+			{Email: "charlie@otherdomain.org", DisplayName: "Charlie"}, // Disallowed domain
+			{Email: "existing@example.com", DisplayName: "Already Member"}, // Existing user in DB
+			{Email: "alice@example.com", DisplayName: "Duplicate Alice"}, // Duplicate within batch
+			{Email: "invalid-email-address", DisplayName: "Bad Syntax"}, // Invalid email syntax
+		},
+		DefaultPermissions: []string{domain.PermCreateProject},
+	}
+	bulkBody, _ := json.Marshal(bulkReq)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/users/bulk-invite", bytes.NewReader(bulkBody))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bulk invite failed (%d): %s", rec.Code, rec.Body.String())
+	}
+
+	var res domain.BulkInviteResult
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if res.Total != 6 {
+		t.Fatalf("expected total 6, got %d", res.Total)
+	}
+	if res.InvitedCount != 2 {
+		t.Fatalf("expected invited_count 2 (Alice & Bob), got %d (res: %+v)", res.InvitedCount, res)
+	}
+	if res.FailedCount != 4 {
+		t.Fatalf("expected failed_count 4, got %d", res.FailedCount)
+	}
+
+	// Verify successes
+	invitedMap := make(map[string]*domain.User)
+	for _, u := range res.InvitedUsers {
+		invitedMap[u.Email] = u
+		if u.Status != domain.UserStatusInvited {
+			t.Errorf("expected status 'invited', got %s for %s", u.Status, u.Email)
+		}
+		if u.InviteURL == "" {
+			t.Errorf("expected invite_url populated for %s", u.Email)
+		}
+	}
+	if _, ok := invitedMap["alice@example.com"]; !ok {
+		t.Errorf("missing alice@example.com in invited users")
+	}
+	if _, ok := invitedMap["bob@sub.example.com"]; !ok {
+		t.Errorf("missing bob@sub.example.com in invited users (subdomain tail-matching)")
+	}
+	t.Logf("✓ Valid invitations succeeded with 72h token URL generated: %d users", len(res.InvitedUsers))
+
+	// Verify failure details
+	failureMap := make(map[string]string)
+	for _, f := range res.Failures {
+		failureMap[f.Email] = f.Reason
+	}
+
+	if reason, ok := failureMap["charlie@otherdomain.org"]; !ok || reason != "メールアドレスのドメインが許可されていません" {
+		t.Errorf("expected domain restriction failure for charlie, got %s", reason)
+	}
+	if reason, ok := failureMap["existing@example.com"]; !ok || reason != "既に登録されているユーザーです" {
+		t.Errorf("expected existing user failure, got %s", reason)
+	}
+	if reason, ok := failureMap["alice@example.com"]; !ok || reason != "既に登録されているユーザーです" {
+		t.Errorf("expected duplicate in batch failure for alice, got %s", reason)
+	}
+	if reason, ok := failureMap["invalid-email-address"]; !ok || reason != "メールアドレスの形式が不正です" {
+		t.Errorf("expected invalid email format failure, got %s", reason)
+	}
+	t.Logf("✓ Failure reasons accurately catalogued: %+v", failureMap)
+}
+

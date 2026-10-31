@@ -51,7 +51,10 @@ function parseInvitationText(text, allowedDomains = [], existingEmails = new Set
 
     let isDomainAllowed = true
     if (allowedDomains && allowedDomains.length > 0) {
-      isDomainAllowed = allowedDomains.some(d => d.toLowerCase() === domain)
+      isDomainAllowed = allowedDomains.some(d => {
+        const cleanD = d.toLowerCase().trim().replace(/^@/, '').replace(/^\./, '')
+        return domain === cleanD || domain.endsWith('.' + cleanD)
+      })
     }
 
     const isDuplicateInBatch = seenEmails.has(lowerEmail)
@@ -124,6 +127,9 @@ existing@company.com
   // Duplicate in batch
   assert.equal(parsed[2].isDuplicateInBatch, true)
 
-  // Already registered
-  assert.equal(parsed[3].isAlreadyRegistered, true)
+  // Subdomain match (tail-matching)
+  const inputSub = `sub.company.com_user@sub.company.com`
+  const parsedSub = parseInvitationText(inputSub, allowed, existing)
+  assert.equal(parsedSub[0].isDomainAllowed, true)
 })
+

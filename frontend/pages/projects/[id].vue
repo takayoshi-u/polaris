@@ -25,96 +25,95 @@
 
     <!-- WORKSPACE VIEWS -->
     <template v-else>
-      <!-- Top Project Workspace Subheader & View Switcher -->
-      <div class="card" style="padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <div>
-          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
-            <h1 style="font-size: 17px; font-weight: 700;">{{ project?.name || 'プロジェクト' }}</h1>
-            <span v-if="project" class="badge badge-blue">
-              基準: {{ formatHours(project.hours_per_day) }}h / 日 ・ Role: {{ project.current_user_role.toUpperCase() }}
-            </span>
-            <span v-if="project" class="badge badge-green">
-              PJ総コスト(予/実): {{ formatCost(project.total_planned_cost) }} / {{ formatCost(project.total_actual_cost) }}
-            </span>
+      <!-- Top Project Workspace Header (Basic Info & Actions/Settings) -->
+      <div class="card" style="padding: 14px 18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+              <h1 style="font-size: 17px; font-weight: 700;">{{ project?.name || 'プロジェクト' }}</h1>
+              <span v-if="project" class="badge badge-blue">
+                基準: {{ formatHours(project.hours_per_day) }}h / 日 ・ Role: {{ project.current_user_role.toUpperCase() }}
+              </span>
+              <span v-if="project" class="badge badge-green">
+                PJ総コスト(予/実): {{ formatCost(project.total_planned_cost) }} / {{ formatCost(project.total_actual_cost) }}
+              </span>
+            </div>
+            <p v-if="project?.description" style="font-size: 12px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">{{ project.description }}</p>
           </div>
-          <p style="font-size: 12px; color: var(--text-muted);">{{ project?.description }}</p>
-        </div>
-      </div>
-
-      <!-- View Tabs & Workspace Actions -->
-      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
-        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-          <button
-            class="btn"
-            :class="activeTab === 'kanban' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'kanban'"
-          >
-            📋 カンバン
-          </button>
-          <button
-            class="btn"
-            :class="activeTab === 'gantt' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'gantt'"
-          >
-            📊 ガント
-          </button>
-          <button
-            class="btn"
-            :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'list'"
-          >
-            📑 リスト / テーブル
-          </button>
-          <button
-            class="btn"
-            :class="activeTab === 'sprint' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'sprint'"
-          >
-            🏃 スプリント
-          </button>
-          <button
-            class="btn"
-            :class="activeTab === 'workload' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'workload'"
-          >
-            👥 リソース負荷
-          </button>
-          <button
-            class="btn"
-            :class="activeTab === 'wiki' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'wiki'"
-          >
-            📖 Wiki
-          </button>
-          <button
-            class="btn"
-            :class="activeTab === 'activity' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'activity'"
-          >
-            ⏱️ アクティビティ
-          </button>
-          <button
-            v-if="project?.current_user_role === 'admin'"
-            class="btn"
-            :class="activeTab === 'settings' ? 'btn-primary' : 'btn-secondary'"
-            @click="activeTab = 'settings'"
-          >
-            ⚙️ プロジェクト設定
-          </button>
         </div>
 
-        <!-- CSV Export / Import Buttons -->
-        <div style="display: flex; gap: 6px; border-left: 1px solid var(--border-color); padding-left: 10px;">
+        <!-- Project Actions & Settings Buttons -->
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
           <button class="btn btn-secondary btn-sm" title="タスクデータをCSVでエクスポート" @click="exportProjectCSV">
             📤 CSV エクスポート
           </button>
           <button v-if="canEditProjectItems" class="btn btn-secondary btn-sm" title="CSVからタスクを一括インポート" @click="showCSVImportModal = true">
             📥 CSV インポート
           </button>
+          <button
+            v-if="canManageProjectSettings"
+            class="btn btn-sm"
+            :class="activeTab === 'settings' ? 'btn-primary' : 'btn-secondary'"
+            title="プロジェクト設定"
+            @click="activeTab = 'settings'"
+          >
+            ⚙️ プロジェクト設定
+          </button>
         </div>
       </div>
-    </div>
+
+      <!-- View Switcher Tabs Bar -->
+      <div class="card" style="padding: 8px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;">
+        <button
+          class="btn"
+          :class="activeTab === 'kanban' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'kanban'"
+        >
+          📋 カンバン
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'gantt' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'gantt'"
+        >
+          📊 ガント
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'list'"
+        >
+          📑 リスト / テーブル
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'sprint' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'sprint'"
+        >
+          🏃 スプリント
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'workload' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'workload'"
+        >
+          👥 リソース負荷
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'wiki' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'wiki'"
+        >
+          📖 Wiki
+        </button>
+        <button
+          class="btn"
+          :class="activeTab === 'activity' ? 'btn-primary' : 'btn-secondary'"
+          @click="activeTab = 'activity'"
+        >
+          ⏱️ アクティビティ
+        </button>
+      </div>
 
     <!-- Common Filter Bar (Kanban / Gantt / List) -->
     <div
@@ -816,7 +815,7 @@
     </section>
 
     <!-- VIEW 8: PROJECT SETTINGS & TEMPLATE BUILDER (Admin Role) -->
-    <section v-if="activeTab === 'settings' && project" style="display: flex; flex-direction: column; gap: 20px;">
+    <section v-if="activeTab === 'settings' && canManageProjectSettings && project" style="display: flex; flex-direction: column; gap: 20px;">
       <!-- 1. Project General Settings -->
       <div class="card">
         <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">プロジェクト基本設定</h3>
@@ -851,12 +850,17 @@
         </form>
       </div>
 
-      <!-- 2. Project Members & Roles + Project Groups -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px;">
-        <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
-          <h3 style="font-size: 15px; font-weight: 700;">参加メンバー・グループ</h3>
-          <form style="display: flex; gap: 8px; flex-wrap: wrap;" @submit.prevent="addProjectMember">
-            <select v-model="memberForm.subject_combined" required style="flex: 1;">
+      <!-- 2. Project Members & Roles Permissions Matrix -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+          <div>
+            <h3 style="font-size: 15px; font-weight: 700;">参加メンバー・グループ権限マトリクス</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px; margin-bottom: 0;">
+              プロジェクトへのアクセス権限をユーザー・グループ単位で設定できます。
+            </p>
+          </div>
+          <form style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;" @submit.prevent="addProjectMember">
+            <select v-model="memberForm.subject_combined" required style="min-width: 220px; font-size: 13px;">
               <option value="">-- ユーザーまたはグループを選択 --</option>
               <optgroup label="ユーザー">
                 <option v-for="u in users" :key="u.id" :value="`user:${u.id}`">👤 {{ u.display_name }} ({{ u.email }})</option>
@@ -865,31 +869,131 @@
                 <option v-for="g in allGroups" :key="g.id" :value="`group:${g.id}`">👥 {{ g.name }}</option>
               </optgroup>
             </select>
-            <select v-model="memberForm.role">
+            <select v-model="memberForm.role" style="font-size: 13px;">
               <option value="admin">Admin (管理者)</option>
               <option value="editor">Editor (編集者)</option>
               <option value="viewer">Viewer (閲覧者)</option>
             </select>
-            <button type="submit" class="btn btn-primary btn-sm">追加/更新</button>
+            <button type="submit" class="btn btn-primary btn-sm">＋ メンバー・グループを追加</button>
           </form>
-
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <div
-              v-for="m in members"
-              :key="m.id"
-              style="padding: 8px 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
-            >
-              <span>
-                {{ m.subject_type === 'user' ? `👤 ${getUserName(m.subject_id)}` : `👥 ${getGroupName(m.subject_id)}` }}
-              </span>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="badge badge-blue">{{ m.role.toUpperCase() }}</span>
-                <button class="btn btn-danger btn-sm" @click="removeProjectMember(m.id)">解除</button>
-              </div>
-            </div>
-          </div>
         </div>
 
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px;">
+                <th style="padding: 10px 12px; text-align: left; font-weight: 600;">対象</th>
+                <th style="padding: 10px 12px; text-align: center; width: 110px; font-weight: 600;">Admin</th>
+                <th style="padding: 10px 12px; text-align: center; width: 110px; font-weight: 600;">Editor</th>
+                <th style="padding: 10px 12px; text-align: center; width: 110px; font-weight: 600;">Viewer</th>
+                <th style="padding: 10px 12px; text-align: right; width: 90px; font-weight: 600;">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="m in members"
+                :key="m.id"
+                style="border-bottom: 1px solid var(--border-color);"
+              >
+                <td style="padding: 10px 12px;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div
+                      style="width: 30px; height: 30px; border-radius: 9999px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0;"
+                      :style="m.subject_type === 'user' ? 'background: rgba(59, 130, 246, 0.15); color: #2563eb;' : 'background: rgba(139, 92, 246, 0.15); color: #7c3aed;'"
+                    >
+                      {{ m.subject_type === 'user' ? (getUserName(m.subject_id)?.[0] || 'U') : (getGroupName(m.subject_id)?.[0] || 'G') }}
+                    </div>
+                    <div>
+                      <div style="font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <span>{{ getMemberSubjectName(m) }}</span>
+                        <span :class="['badge', m.subject_type === 'user' ? 'badge-blue' : 'badge-purple']" style="font-size: 10px; padding: 1px 6px;">
+                          {{ m.subject_type === 'user' ? 'ユーザー' : 'グループ' }}
+                        </span>
+                        <span v-if="isLastAdmin(m)" class="badge badge-amber" style="font-size: 10px; padding: 1px 6px;">
+                          唯一の管理者
+                        </span>
+                      </div>
+                      <div v-if="m.subject_type === 'user'" style="font-size: 11px; color: var(--text-muted); margin-top: 1px;">
+                        {{ users.find(u => u.id === m.subject_id)?.email }}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 10px 12px; text-align: center;">
+                  <label style="cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                    <input
+                      type="radio"
+                      :name="`role-${m.id}`"
+                      value="admin"
+                      :checked="m.role === 'admin'"
+                      style="cursor: pointer; width: 16px; height: 16px;"
+                      @change="updateMemberRole(m, 'admin')"
+                    />
+                  </label>
+                </td>
+                <td style="padding: 10px 12px; text-align: center;">
+                  <label
+                    :style="isLastAdmin(m) ? 'cursor: not-allowed; opacity: 0.4;' : 'cursor: pointer;'"
+                    :title="isLastAdmin(m) ? '最後の管理者は降格できません' : ''"
+                    style="display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%;"
+                  >
+                    <input
+                      type="radio"
+                      :name="`role-${m.id}`"
+                      value="editor"
+                      :checked="m.role === 'editor'"
+                      :disabled="isLastAdmin(m)"
+                      :style="isLastAdmin(m) ? 'cursor: not-allowed;' : 'cursor: pointer;'"
+                      style="width: 16px; height: 16px;"
+                      @change="updateMemberRole(m, 'editor')"
+                    />
+                  </label>
+                </td>
+                <td style="padding: 10px 12px; text-align: center;">
+                  <label
+                    :style="isLastAdmin(m) ? 'cursor: not-allowed; opacity: 0.4;' : 'cursor: pointer;'"
+                    :title="isLastAdmin(m) ? '最後の管理者は降格できません' : ''"
+                    style="display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%;"
+                  >
+                    <input
+                      type="radio"
+                      :name="`role-${m.id}`"
+                      value="viewer"
+                      :checked="m.role === 'viewer'"
+                      :disabled="isLastAdmin(m)"
+                      :style="isLastAdmin(m) ? 'cursor: not-allowed;' : 'cursor: pointer;'"
+                      style="width: 16px; height: 16px;"
+                      @change="updateMemberRole(m, 'viewer')"
+                    />
+                  </label>
+                </td>
+                <td style="padding: 10px 12px; text-align: right;">
+                  <button
+                    class="btn btn-danger btn-sm"
+                    :disabled="isLastAdmin(m)"
+                    :title="isLastAdmin(m) ? '最後の管理者は削除できません' : '解除'"
+                    @click="removeProjectMember(m)"
+                  >
+                    解除
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="members.length === 0">
+                <td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">
+                  参加メンバー・グループが登録されていません
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
+          ※ 各メンバーの権限列（Admin / Editor / Viewer）をクリックして即時変更できます。最後の管理者は降格・削除できません。
+        </p>
+      </div>
+
+      <!-- 3. Project Statuses & Labels -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px;">
         <!-- Project Statuses (1..10, migration on delete) -->
         <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
           <h3 style="font-size: 15px; font-weight: 700;">ステータス設定</h3>
@@ -922,10 +1026,8 @@
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 3. Project Labels & Custom Field Definitions -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px;">
+        <!-- Project固有ラベル -->
         <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
           <h3 style="font-size: 15px; font-weight: 700;">プロジェクト固有ラベル</h3>
           <form style="display: flex; gap: 8px;" @submit.prevent="createProjectLabel">
@@ -944,50 +1046,51 @@
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
-          <h3 style="font-size: 15px; font-weight: 700;">カスタム属性定義</h3>
-          <form style="display: flex; flex-wrap: wrap; gap: 8px;" @submit.prevent="createCustomField">
-            <select v-model="cfForm.target_type">
-              <option value="issue">課題用</option>
-              <option value="task">タスク用</option>
-            </select>
-            <input v-model="cfForm.name" type="text" required style="flex: 1;" placeholder="項目名（例: 外注見積金額）" />
-            <select v-model="cfForm.field_type">
-              <option value="text_single">1行テキスト</option>
-              <option value="text_multi">複数行テキスト</option>
-              <option value="markdown">Markdown</option>
-              <option value="number">数値</option>
-              <option value="date">日付</option>
-              <option value="select">プルダウン</option>
-              <option value="radio">ラジオボタン</option>
-              <option value="checkbox">チェックボックス</option>
-              <option value="user_group">ユーザー/グループ</option>
-            </select>
-            <input
-              v-if="['select', 'radio', 'checkbox'].includes(cfForm.field_type)"
-              v-model="cfForm.options_csv"
-              type="text"
-              style="width: 100%;"
-              placeholder="選択肢（カンマ区切り: A, B, C）"
-            />
-            <button type="submit" class="btn btn-primary btn-sm">＋ 追加</button>
-          </form>
+      <!-- 4. Custom Field Definitions -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 12px;">
+        <h3 style="font-size: 15px; font-weight: 700;">カスタム属性定義</h3>
+        <form style="display: flex; flex-wrap: wrap; gap: 8px;" @submit.prevent="createCustomField">
+          <select v-model="cfForm.target_type">
+            <option value="issue">課題用</option>
+            <option value="task">タスク用</option>
+          </select>
+          <input v-model="cfForm.name" type="text" required style="flex: 1;" placeholder="項目名（例: 外注見積金額）" />
+          <select v-model="cfForm.field_type">
+            <option value="text_single">1行テキスト</option>
+            <option value="text_multi">複数行テキスト</option>
+            <option value="markdown">Markdown</option>
+            <option value="number">数値</option>
+            <option value="date">日付</option>
+            <option value="select">プルダウン</option>
+            <option value="radio">ラジオボタン</option>
+            <option value="checkbox">チェックボックス</option>
+            <option value="user_group">ユーザー/グループ</option>
+          </select>
+          <input
+            v-if="['select', 'radio', 'checkbox'].includes(cfForm.field_type)"
+            v-model="cfForm.options_csv"
+            type="text"
+            style="width: 100%;"
+            placeholder="選択肢（カンマ区切り: A, B, C）"
+          />
+          <button type="submit" class="btn btn-primary btn-sm">＋ 追加</button>
+        </form>
 
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <div
-              v-for="cf in customFields"
-              :key="cf.id"
-              style="padding: 6px 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
-            >
-              <span>
-                <span :class="['badge', cf.target_type === 'issue' ? 'badge-green' : 'badge-blue']" style="margin-right: 6px;">
-                  {{ cf.target_type === 'issue' ? '課題' : 'タスク' }}
-                </span>
-                <strong>{{ cf.name }}</strong> ({{ cf.field_type }})
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div
+            v-for="cf in customFields"
+            :key="cf.id"
+            style="padding: 6px 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
+          >
+            <span>
+              <span :class="['badge', cf.target_type === 'issue' ? 'badge-green' : 'badge-blue']" style="margin-right: 6px;">
+                {{ cf.target_type === 'issue' ? '課題' : 'タスク' }}
               </span>
-              <button class="btn btn-danger btn-sm" @click="deleteCustomField(cf.id)">削除</button>
-            </div>
+              <strong>{{ cf.name }}</strong> ({{ cf.field_type }})
+            </span>
+            <button class="btn btn-danger btn-sm" @click="deleteCustomField(cf.id)">削除</button>
           </div>
         </div>
       </div>
@@ -1622,7 +1725,7 @@ const PRESET_COLORS = [
 
 const route = useRoute()
 const router = useRouter()
-const { apiFetch, notifyToast, refreshProjects } = useApi()
+const { apiFetch, notifyToast, refreshProjects, hasSystemPerm } = useApi()
 
 const projectId = computed(() => route.params.id as string)
 
@@ -1784,8 +1887,18 @@ async function refreshAllWorkspace() {
   await Promise.all([loadIssues(), loadWorkspace(), refreshProjects()])
 }
 
+const canManageProjectSettings = computed(() => {
+  return project.value?.current_user_role === 'admin' || hasSystemPerm('manage_system')
+})
+
 const canEditProjectItems = computed(() => {
   return project.value?.current_user_role === 'admin' || project.value?.current_user_role === 'editor'
+})
+
+watch([activeTab, canManageProjectSettings], ([newTab, canManage]) => {
+  if (newTab === 'settings' && !canManage) {
+    activeTab.value = 'kanban'
+  }
 })
 
 const allLabels = computed(() => [...systemLabels.value, ...projectLabels.value])
@@ -2637,6 +2750,39 @@ async function saveProjectSettings() {
   }
 }
 
+const adminMembersCount = computed(() => members.value.filter(m => m.role === 'admin').length)
+
+function isLastAdmin(m: ProjectMember): boolean {
+  return m.role === 'admin' && adminMembersCount.value <= 1
+}
+
+function getMemberSubjectName(m: ProjectMember): string {
+  return m.subject_type === 'user' ? getUserName(m.subject_id) : getGroupName(m.subject_id)
+}
+
+async function updateMemberRole(m: ProjectMember, newRole: 'admin' | 'editor' | 'viewer') {
+  if (m.role === newRole) return
+  if (isLastAdmin(m) && newRole !== 'admin') {
+    notifyToast('最後の管理者は降格できません', 'error')
+    return
+  }
+  try {
+    await apiFetch(`/projects/${projectId.value}/members`, {
+      method: 'POST',
+      body: JSON.stringify({
+        subject_type: m.subject_type,
+        subject_id: m.subject_id,
+        role: newRole
+      })
+    })
+    await loadWorkspace()
+    notifyToast(`「${getMemberSubjectName(m)}」の権限を更新しました`, 'success')
+  } catch (e: any) {
+    await loadWorkspace()
+    notifyToast(e.message, 'error')
+  }
+}
+
 async function addProjectMember() {
   const [subject_type, subject_id] = memberForm.subject_combined.split(':')
   if (!subject_type || !subject_id) return
@@ -2657,11 +2803,17 @@ async function addProjectMember() {
   }
 }
 
-async function removeProjectMember(memberId: string) {
+async function removeProjectMember(m: ProjectMember) {
+  if (isLastAdmin(m)) {
+    notifyToast('最後の管理者は削除できません', 'error')
+    return
+  }
+  const name = getMemberSubjectName(m)
+  if (!confirm(`「${name}」をプロジェクトメンバーから解除しますか？`)) return
   try {
-    await apiFetch(`/projects/${projectId.value}/members/${memberId}`, { method: 'DELETE' })
+    await apiFetch(`/projects/${projectId.value}/members/${m.id}`, { method: 'DELETE' })
     await loadWorkspace()
-    notifyToast('メンバーを解除しました', 'success')
+    notifyToast(`「${name}」を解除しました`, 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
   }

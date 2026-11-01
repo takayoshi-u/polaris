@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL,
     password_hash TEXT,
     google_sub VARCHAR(255) UNIQUE,
     display_name VARCHAR(255) NOT NULL,
@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_active_email ON users(LOWER(email)) WHERE status != 'disabled';
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(LOWER(email));
 
 CREATE TABLE IF NOT EXISTS user_sessions (
     id UUID PRIMARY KEY,

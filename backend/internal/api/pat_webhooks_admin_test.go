@@ -450,6 +450,9 @@ func (s *mockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		cnt := int64(0)
 		for _, u := range st.users {
 			if strings.ToLower(u.Email) == email {
+				if strings.Contains(q, "status != 'disabled'") && u.Status == domain.UserStatusDisabled {
+					continue
+				}
 				cnt++
 			}
 		}

@@ -109,37 +109,71 @@
         </nav>
       </div>
 
-      <!-- User Footer & Notification Bell -->
-      <div v-if="currentUser" style="border-top: 1px solid var(--border-color); padding-top: 12px; display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-          <div
-            style="display: flex; align-items: center; gap: 8px; cursor: default; overflow: hidden;"
-          >
-            <div style="width: 34px; height: 34px; border-radius: 999px; background: #4f46e5; color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-              {{ currentUser.display_name.slice(0, 2).toUpperCase() }}
+      <!-- User Footer & Actions (2-Tier Layout) -->
+      <div v-if="currentUser" style="border-top: 1px solid var(--border-color); padding-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <!-- 上段（ユーザー情報カード） -->
+        <div
+          style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: 8px; cursor: default; overflow: hidden; width: 100%; box-sizing: border-box;"
+        >
+          <div style="width: 34px; height: 34px; border-radius: 999px; background: #4f46e5; color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            {{ currentUser.display_name.slice(0, 2).toUpperCase() }}
+          </div>
+          <div style="overflow: hidden; flex: 1; min-width: 0;">
+            <div
+              :title="currentUser.display_name"
+              style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+            >
+              {{ currentUser.display_name }}
             </div>
-            <div style="overflow: hidden;">
-              <div style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                {{ currentUser.display_name }}
-              </div>
-              <div style="font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                {{ currentUser.email }}
-              </div>
+            <div
+              :title="currentUser.email"
+              style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;"
+            >
+              {{ currentUser.email }}
             </div>
           </div>
+        </div>
 
-          <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-            <button ref="notificationBellRef" class="btn btn-secondary btn-sm" title="通知一覧" @click="toggleNotifications">
-              <Bell :size="14" />
-              <span>{{ unreadCount }}</span>
-            </button>
-            <button class="btn btn-ghost btn-sm" title="アカウント設定" @click="openAccountModal">
-              <Settings :size="14" />
-            </button>
-            <button class="btn btn-ghost btn-sm" title="ログアウト" style="color: var(--danger);" @click="logout">
-              <LogOut :size="14" />
-            </button>
-          </div>
+        <!-- 下段（アクションボタングループ） -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+          <button
+            ref="notificationBellRef"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            style="display: flex; align-items: center; justify-content: center; gap: 3px; padding: 6px 2px; font-size: 11px; width: 100%; white-space: nowrap;"
+            title="通知一覧"
+            @click="toggleNotifications"
+          >
+            <Bell :size="14" />
+            <span>通知</span>
+            <span
+              v-if="unreadCount > 0"
+              class="badge badge-amber"
+              style="font-size: 9px; padding: 0 4px; line-height: 13px; height: 13px; border-radius: 999px;"
+            >
+              {{ unreadCount }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            style="display: flex; align-items: center; justify-content: center; gap: 3px; padding: 6px 2px; font-size: 11px; width: 100%; white-space: nowrap;"
+            title="アカウント設定"
+            @click="openAccountModal"
+          >
+            <Settings :size="14" />
+            <span>設定</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            style="display: flex; align-items: center; justify-content: center; gap: 3px; padding: 6px 2px; font-size: 11px; width: 100%; white-space: nowrap; color: var(--danger);"
+            title="ログアウト"
+            @click="openLogoutModal"
+          >
+            <LogOut :size="14" />
+            <span>ログアウト</span>
+          </button>
         </div>
       </div>
     </aside>
@@ -311,7 +345,7 @@
               </button>
             </div>
           </div>
-          <button class="btn btn-danger btn-sm" @click="logout">ログアウト</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="padding: 2px 6px;" title="閉じる" @click="showAccountModal = false">✕</button>
         </div>
 
         <!-- TAB 1: PROFILE & CREDENTIALS -->
@@ -877,6 +911,56 @@
         </div>
       </div>
     </div>
+
+    <!-- Logout Confirmation Modal (Requirement 3) -->
+    <div
+      v-if="showLogoutModal"
+      class="modal-backdrop"
+      style="z-index: 10000;"
+      @click.self="!isLoggingOut && (showLogoutModal = false)"
+    >
+      <div class="modal-panel" style="max-width: 400px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <h3 style="font-size: 15px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 6px;">
+            <LogOut :size="16" style="color: var(--danger);" />
+            ログアウトの確認
+          </h3>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            style="padding: 2px 6px;"
+            :disabled="isLoggingOut"
+            @click="showLogoutModal = false"
+          >
+            ✕
+          </button>
+        </div>
+
+        <p style="font-size: 13px; color: var(--text-main); margin-bottom: 20px;">
+          ログアウトしてログイン画面に戻りますか？
+        </p>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="isLoggingOut"
+            @click="showLogoutModal = false"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            class="btn btn-danger btn-sm"
+            :disabled="isLoggingOut"
+            @click="executeLogout"
+          >
+            <LogOut :size="14" />
+            <span>{{ isLoggingOut ? 'ログアウト中...' : 'ログアウト' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -934,6 +1018,8 @@ const isMobileSidebarOpen = ref(false)
 const showNotifications = ref(false)
 const showNewProjectModal = ref(false)
 const showAccountModal = ref(false)
+const showLogoutModal = ref(false)
+const isLoggingOut = ref(false)
 
 watch(() => route.fullPath, () => {
   isMobileSidebarOpen.value = false
@@ -1261,12 +1347,20 @@ function onDocumentClick(e: MouseEvent) {
   showNotifications.value = false
 }
 
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && showLogoutModal.value && !isLoggingOut.value) {
+    showLogoutModal.value = false
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
+  window.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('keydown', onKeydown)
 })
 
 function toggleNotifications() {
@@ -1362,12 +1456,24 @@ async function requestEmailChange() {
   }
 }
 
-async function logout() {
+function openLogoutModal() {
+  showLogoutModal.value = true
+}
+
+function logout() {
+  openLogoutModal()
+}
+
+async function executeLogout() {
+  if (isLoggingOut.value) return
+  isLoggingOut.value = true
   try {
     await apiFetch('/auth/logout', { method: 'POST' })
   } finally {
     currentUser.value = null
     showAccountModal.value = false
+    showLogoutModal.value = false
+    isLoggingOut.value = false
     router.push('/login')
   }
 }

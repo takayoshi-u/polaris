@@ -305,8 +305,66 @@ func ValidateTaskCost(v *float64, fieldName string) error {
 	return nil
 }
 
-// CalculateIssueRollup computes the aggregated dates, hours, weighted average progress, and deduplicated assignees for an Issue.
-func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
+// IsDoneStatusName returns true if the status name indicates completion ("完了", "クローズ", "done", "closed", or exact "close").
+func IsDoneStatusName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "close" || lower == "closed" {
+		return true
+	}
+	if strings.Contains(lower, "完了") || strings.Contains(lower, "クローズ") || strings.Contains(lower, "done") {
+		return true
+	}
+	// Check word-bounded "closed" (so "disclosed" or "unclosed" does not match)
+	for _, token := range strings.FieldsFunc(lower, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+	}) {
+		if token == "closed" || token == "close" {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveDoneStatusIDs determines the set of Done status IDs from a slice of statuses.
+// First pass: any status matching IsDoneStatusName(st.Name).
+// Fallback pass (only if 0 matched by name and len(statuses) >= 2): status(es) with display_order == maxOrder (when maxOrder > minOrder).
+func ResolveDoneStatusIDs(statuses []Status) map[string]bool {
+	doneIDs := make(map[string]bool)
+	if len(statuses) == 0 {
+		return doneIDs
+	}
+	for _, st := range statuses {
+		if IsDoneStatusName(st.Name) {
+			doneIDs[st.ID] = true
+		}
+	}
+	if len(doneIDs) > 0 {
+		return doneIDs
+	}
+	if len(statuses) >= 2 {
+		minOrder := statuses[0].DisplayOrder
+		maxOrder := statuses[0].DisplayOrder
+		for _, st := range statuses[1:] {
+			if st.DisplayOrder < minOrder {
+				minOrder = st.DisplayOrder
+			}
+			if st.DisplayOrder > maxOrder {
+				maxOrder = st.DisplayOrder
+			}
+		}
+		if maxOrder > minOrder {
+			for _, st := range statuses {
+				if st.DisplayOrder == maxOrder {
+					doneIDs[st.ID] = true
+				}
+			}
+		}
+	}
+	return doneIDs
+}
+
+// CalculateIssueRollup computes the aggregated dates, hours, story points, weighted average progress, and deduplicated assignees for an Issue.
+func CalculateIssueRollup(tasks []Task, hoursPerDay float64, doneStatusIDs ...map[string]bool) IssueRollup {
 	if hoursPerDay < 1.0 || hoursPerDay > 24.0 {
 		hoursPerDay = 8.0
 	}
@@ -316,6 +374,11 @@ func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
 	}
 	if len(tasks) == 0 {
 		return rollup
+	}
+
+	var doneSet map[string]bool
+	if len(doneStatusIDs) > 0 && doneStatusIDs[0] != nil {
+		doneSet = doneStatusIDs[0]
 	}
 
 	var minPlanStart, maxPlanEnd *string
@@ -362,6 +425,13 @@ func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
 		if t.ActualCost != nil {
 			rollup.TotalActualCost += *t.ActualCost
 		}
+		if t.StoryPoints != nil {
+			rollup.TotalStoryPoints += *t.StoryPoints
+			isDone := t.Progress >= 100 || (doneSet != nil && doneSet[t.StatusID])
+			if isDone {
+				rollup.CompletedStoryPoints += *t.StoryPoints
+			}
+		}
 
 		// Determine weight for weighted progress calculation
 		weight := 0.0
@@ -399,6 +469,8 @@ func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
 	rollup.TotalActualHours = math.Round(rollup.TotalActualHours*100) / 100
 	rollup.TotalPlannedCost = math.Round(rollup.TotalPlannedCost*100) / 100
 	rollup.TotalActualCost = math.Round(rollup.TotalActualCost*100) / 100
+	rollup.TotalStoryPoints = math.Round(rollup.TotalStoryPoints*100) / 100
+	rollup.CompletedStoryPoints = math.Round(rollup.CompletedStoryPoints*100) / 100
 	if totalWeight > 0 {
 		rollup.WeightedProgress = math.Round((weightedProgressSum/totalWeight)*10) / 10
 	}

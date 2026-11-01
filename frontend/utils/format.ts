@@ -1,5 +1,22 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import {
+  buildGanttHeaderGroups as _buildGanttHeaderGroups,
+  calculateSprintMetrics as _calculateSprintMetrics,
+  calculateVelocityStats as _calculateVelocityStats,
+  formatLocalYMD as _formatLocalYMD,
+  getGanttScaleConfig as _getGanttScaleConfig,
+  isDoneStatusName as _isDoneStatusName,
+  isTaskCompleted as _isTaskCompleted,
+  resolveDoneStatusIds as _resolveDoneStatusIds
+} from './agile_gantt.mjs'
+
+/**
+ * Formats a Date object (or date-like value) to local YYYY-MM-DD using local calendar getters.
+ */
+export function formatLocalYMD(date: Date | string | number = new Date()): string {
+  return _formatLocalYMD(date)
+}
 
 /**
  * Formats an ISO timestamp string to JST (Asia/Tokyo) YYYY-MM-DD HH:mm.
@@ -698,6 +715,150 @@ export function parseDirectUserText(
   }
 
   return results
+}
+
+/**
+ * Checks whether a status name represents a completed/done state.
+ */
+export function isDoneStatusName(name?: string | null): boolean {
+  return _isDoneStatusName(name)
+}
+
+/**
+ * Resolves the Set of status IDs considered "Done/Completed" for a project.
+ */
+export function resolveDoneStatusIds(
+  statuses: { id: string; name: string; display_order: number }[] = []
+): Set<string> {
+  return _resolveDoneStatusIds(statuses)
+}
+
+/**
+ * Determines whether a task is considered completed based on its progress or status.
+ */
+export function isTaskCompleted(
+  task: { progress?: number | null; status_id?: string | null },
+  statuses: { id: string; name: string; display_order: number }[] = []
+): boolean {
+  return _isTaskCompleted(task, statuses)
+}
+
+export interface SprintMetricsResult {
+  taskCount: number
+  completedTaskCount: number
+  totalSP: number
+  completedSP: number
+  completionRate: number
+  plannedHours: number
+  actualHours: number
+}
+
+/**
+ * Calculates sprint task and story point completion metrics.
+ */
+export function calculateSprintMetrics(
+  tasks: {
+    story_points?: number | null
+    planned_hours?: number | null
+    actual_hours?: number | null
+    progress?: number | null
+    status_id?: string | null
+  }[],
+  statuses: { id: string; name: string; display_order: number }[] = [],
+  sprintObj: {
+    task_count?: number | null
+    completed_task_count?: number | null
+    total_story_points?: number | null
+    completed_story_points?: number | null
+    total_planned_hours?: number | null
+    total_actual_hours?: number | null
+  } | null = null
+): SprintMetricsResult {
+  return _calculateSprintMetrics(tasks, statuses, sprintObj)
+}
+
+export interface SprintVelocityItem {
+  id: string
+  name: string
+  status: string
+  taskCount: number
+  completedTaskCount: number
+  plannedSP: number
+  completedSP: number
+  completionRate: number
+}
+
+export interface VelocityStatsResult {
+  sprints: SprintVelocityItem[]
+  sprintStats: SprintVelocityItem[]
+  averageVelocity: number
+  recentVelocity: number
+  overallCompletionRate: number
+}
+
+/**
+ * Calculates per-sprint velocity breakdown and average velocity across sprints.
+ */
+export function calculateVelocityStats(
+  sprints: {
+    id: string
+    name: string
+    status: string
+    task_count?: number | null
+    completed_task_count?: number | null
+    total_story_points?: number | null
+    completed_story_points?: number | null
+    total_planned_hours?: number | null
+    total_actual_hours?: number | null
+  }[],
+  allTasks: {
+    sprint_id?: string | null
+    story_points?: number | null
+    planned_hours?: number | null
+    actual_hours?: number | null
+    progress?: number | null
+    status_id?: string | null
+  }[],
+  statuses: { id: string; name: string; display_order: number }[] = []
+): VelocityStatsResult {
+  return _calculateVelocityStats(sprints, allTasks, statuses)
+}
+
+export interface GanttHeaderGroup {
+  key: string
+  label: string
+  startYMD: string
+  endYMD: string
+  count: number
+  widthPx: number
+  isWeekend?: boolean
+}
+
+export interface GanttScaleHeaderResult {
+  scale: 'day' | 'week' | 'month'
+  baseDayWidth: number
+  defaultDayCount: number
+  upperGroups: GanttHeaderGroup[]
+  lowerGroups: GanttHeaderGroup[]
+  totalWidthPx: number
+}
+
+/**
+ * Returns the default baseDayWidth and day count for each Gantt scale.
+ */
+export function getGanttScaleConfig(scale: 'day' | 'week' | 'month'): { baseDayWidth: number; count: number } {
+  return _getGanttScaleConfig(scale)
+}
+
+/**
+ * Builds upper and lower tier header groups for the Gantt chart according to scale ('day' | 'week' | 'month').
+ */
+export function buildGanttHeaderGroups(
+  timelineDays: string[],
+  scale: 'day' | 'week' | 'month',
+  dayWidth?: number
+): GanttScaleHeaderResult {
+  return _buildGanttHeaderGroups(timelineDays, scale, dayWidth)
 }
 
 

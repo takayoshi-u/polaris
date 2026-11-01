@@ -849,3 +849,380 @@ func TestTask_SprintAndStoryPointsRoundTrip(t *testing.T) {
 		t.Fatalf("expected persisted cleared task story_points to be nil, got %v", *getTask.StoryPoints)
 	}
 }
+
+func TestAgileEnhancements_PremortemPostmortemAndSprintFilter(t *testing.T) {
+	rig := setupTestRig(t)
+	defer rig.db.Close()
+
+	srv := rig.srv
+	cookie := rig.adminCookie
+
+	// 1. Create Project
+	projBody, _ := json.Marshal(map[string]any{
+		"name":          "Agile Enhancements Project",
+		"description":   "Testing premortem/postmortem, sprint filters, and story point rollups",
+		"hours_per_day": 8.0,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(projBody))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create project (%d): %s", rec.Code, rec.Body.String())
+	}
+	var proj domain.Project
+	_ = json.NewDecoder(rec.Body).Decode(&proj)
+
+	// Fetch statuses (first = todo, last = done)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/statuses", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var statuses []domain.Status
+	_ = json.NewDecoder(rec.Body).Decode(&statuses)
+	if len(statuses) < 2 {
+		t.Fatalf("expected at least 2 statuses, got %d", len(statuses))
+	}
+	todoStatusID := statuses[0].ID
+	doneStatusID := statuses[len(statuses)-1].ID
+
+	// 2. Issue Premortem & Postmortem Round-Trip (Create -> Get -> Update -> Clear)
+	createIssueBody, _ := json.Marshal(map[string]any{
+		"title":       "Incident Prevention Epic",
+		"description": "Epic description",
+		"premortem":   "Risk: DB connection pool exhaustion",
+		"postmortem":  "Initial postmortem note",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/issues", proj.ID), bytes.NewReader(createIssueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create issue (%d): %s", rec.Code, rec.Body.String())
+	}
+	var createdIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&createdIssue)
+	if createdIssue.Premortem != "Risk: DB connection pool exhaustion" {
+		t.Fatalf("expected premortem set on create, got %q", createdIssue.Premortem)
+	}
+	if createdIssue.Postmortem != "Initial postmortem note" {
+		t.Fatalf("expected postmortem set on create, got %q", createdIssue.Postmortem)
+	}
+
+	// Verify GET persistence
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var fetchedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&fetchedIssue)
+	if fetchedIssue.Premortem != "Risk: DB connection pool exhaustion" || fetchedIssue.Postmortem != "Initial postmortem note" {
+		t.Fatalf("expected persisted premortem/postmortem, got %q / %q", fetchedIssue.Premortem, fetchedIssue.Postmortem)
+	}
+
+	// Update premortem & postmortem
+	updateIssueBody, _ := json.Marshal(map[string]any{
+		"premortem":  "Updated Risk: Cache stampede",
+		"postmortem": "Resolved with singleflight",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), bytes.NewReader(updateIssueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to update issue (%d): %s", rec.Code, rec.Body.String())
+	}
+	var updatedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&updatedIssue)
+	if updatedIssue.Premortem != "Updated Risk: Cache stampede" || updatedIssue.Postmortem != "Resolved with singleflight" {
+		t.Fatalf("expected updated premortem/postmortem, got %q / %q", updatedIssue.Premortem, updatedIssue.Postmortem)
+	}
+
+	// Partial update omitting premortem/postmortem preserves existing values
+	titleOnlyUpdateBody, _ := json.Marshal(map[string]any{
+		"title": "Incident Prevention Epic (Renamed)",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), bytes.NewReader(titleOnlyUpdateBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to partial update issue (%d): %s", rec.Code, rec.Body.String())
+	}
+	var preservedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&preservedIssue)
+	if preservedIssue.Premortem != "Updated Risk: Cache stampede" || preservedIssue.Postmortem != "Resolved with singleflight" {
+		t.Fatalf("expected premortem/postmortem preserved when omitted, got %q / %q", preservedIssue.Premortem, preservedIssue.Postmortem)
+	}
+
+	// Viewer cannot update premortem/postmortem (403 Forbidden)
+	viewerUser, err := rig.st.CreateUserDirect(t.Context(), "viewer-agile@example.com", "Viewer User", "Password123!", false, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create viewer user: %v", err)
+	}
+	_, _ = rig.st.UpsertProjectMember(t.Context(), proj.ID, domain.SubjectUser, viewerUser.ID, domain.RoleViewer)
+	viewerLoginRes, err := rig.st.AuthenticateWithPassword(t.Context(), "viewer-agile@example.com", "Password123!")
+	if err != nil {
+		t.Fatalf("failed to login viewer: %v", err)
+	}
+	viewerCookie := &http.Cookie{Name: rig.adminCookie.Name, Value: viewerLoginRes.SessionToken}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), bytes.NewReader(updateIssueBody))
+	req.AddCookie(viewerCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for viewer updating issue premortem/postmortem, got %d", rec.Code)
+	}
+
+	// Clear premortem & postmortem with empty string
+	clearIssueBody, _ := json.Marshal(map[string]any{
+		"premortem":  "",
+		"postmortem": "",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), bytes.NewReader(clearIssueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to clear issue premortem/postmortem (%d): %s", rec.Code, rec.Body.String())
+	}
+	var clearedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&clearedIssue)
+	if clearedIssue.Premortem != "" || clearedIssue.Postmortem != "" {
+		t.Fatalf("expected cleared premortem/postmortem, got %q / %q", clearedIssue.Premortem, clearedIssue.Postmortem)
+	}
+
+	// 3. Create Active Sprint & Planned Sprint
+	spActiveBody, _ := json.Marshal(map[string]any{
+		"name":   "Active Sprint 1",
+		"status": "active",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/sprints", proj.ID), bytes.NewReader(spActiveBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var activeSprint domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&activeSprint)
+
+	// 4. Create 3 Tasks:
+	// - Task A: in activeSprint, SP=3, progress=100 (todo status) -> completed via progress
+	// - Task B: in activeSprint, SP=5, progress=20 (done status) -> completed via Done status
+	// - Task C: unassigned sprint, SP=2, progress=0 (todo status) -> not completed
+	for _, tc := range []map[string]any{
+		{"issue_id": createdIssue.ID, "title": "Task A", "status_id": todoStatusID, "sprint_id": activeSprint.ID, "story_points": 3.0, "progress": 100},
+		{"issue_id": createdIssue.ID, "title": "Task B", "status_id": doneStatusID, "sprint_id": activeSprint.ID, "story_points": 5.0, "progress": 20},
+		{"issue_id": createdIssue.ID, "title": "Task C", "status_id": todoStatusID, "story_points": 2.0, "progress": 0},
+	} {
+		b, _ := json.Marshal(tc)
+		req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", proj.ID), bytes.NewReader(b))
+		req.AddCookie(cookie)
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("failed to create task (%d): %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// 5. Verify Issue Rollup SP
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	_ = json.NewDecoder(rec.Body).Decode(&fetchedIssue)
+	if fetchedIssue.Rollup.TotalStoryPoints != 10.0 {
+		t.Fatalf("expected issue TotalStoryPoints 10.0, got %v", fetchedIssue.Rollup.TotalStoryPoints)
+	}
+	if fetchedIssue.Rollup.CompletedStoryPoints != 8.0 {
+		t.Fatalf("expected issue CompletedStoryPoints 8.0, got %v", fetchedIssue.Rollup.CompletedStoryPoints)
+	}
+
+	// 6. Verify Sprint CompletedTaskCount & CompletedStoryPoints in GET & List
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sprints/%s", activeSprint.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var gotSprint domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&gotSprint)
+	if gotSprint.TaskCount != 2 || gotSprint.CompletedTaskCount != 2 {
+		t.Fatalf("expected sprint TaskCount=2, CompletedTaskCount=2, got %d / %d", gotSprint.TaskCount, gotSprint.CompletedTaskCount)
+	}
+	if gotSprint.TotalStoryPoints != 8.0 || gotSprint.CompletedStoryPoints != 8.0 {
+		t.Fatalf("expected sprint TotalStoryPoints=8.0, CompletedStoryPoints=8.0, got %v / %v", gotSprint.TotalStoryPoints, gotSprint.CompletedStoryPoints)
+	}
+
+	// 7. Verify GET /projects/{id}/issues?sprint_id=... filters
+	// 7a: sprint_id=unassigned -> only Task C
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=unassigned", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var unassignedIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&unassignedIssues)
+	if len(unassignedIssues) != 1 || len(unassignedIssues[0].Tasks) != 1 || unassignedIssues[0].Tasks[0].Title != "Task C" {
+		t.Fatalf("expected 1 issue with Task C for sprint_id=unassigned, got %+v", unassignedIssues)
+	}
+
+	// 7b: sprint_id=active -> Task A & Task B
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=active", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var activeIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&activeIssues)
+	if len(activeIssues) != 1 || len(activeIssues[0].Tasks) != 2 {
+		t.Fatalf("expected 1 issue with 2 tasks for sprint_id=active, got %+v", activeIssues)
+	}
+
+	// 7c: sprint_id=<UUID> -> Task A & Task B
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=%s", proj.ID, activeSprint.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var uuidIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&uuidIssues)
+	if len(uuidIssues) != 1 || len(uuidIssues[0].Tasks) != 2 {
+		t.Fatalf("expected 1 issue with 2 tasks for sprint_id=%s, got %+v", activeSprint.ID, uuidIssues)
+	}
+
+	// 7d: unknown sprint_id -> 0 issues
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=00000000-0000-0000-0000-000000000000", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var unknownSprintIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&unknownSprintIssues)
+	if len(unknownSprintIssues) != 0 {
+		t.Fatalf("expected 0 issues for unknown sprint_id, got %d", len(unknownSprintIssues))
+	}
+
+	// 7e: cross-project sprint_id -> 0 issues in proj, and rejected as rollover_target_sprint_id
+	otherProjBody, _ := json.Marshal(map[string]any{
+		"name": "Other Project",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(otherProjBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var otherProj domain.Project
+	_ = json.NewDecoder(rec.Body).Decode(&otherProj)
+
+	otherSpBody, _ := json.Marshal(map[string]any{
+		"name":   "Other Sprint",
+		"status": "planned",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/sprints", otherProj.ID), bytes.NewReader(otherSpBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var otherSp domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&otherSp)
+
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=%s", proj.ID, otherSp.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var crossSprintIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&crossSprintIssues)
+	if len(crossSprintIssues) != 0 {
+		t.Fatalf("expected 0 issues for cross-project sprint_id, got %d", len(crossSprintIssues))
+	}
+
+	// 8. Verify Burndown when task is Done via status (Task B has progress=20, status=done, actual_end_date=nil)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sprints/%s/burndown", activeSprint.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to get burndown (%d): %s", rec.Code, rec.Body.String())
+	}
+	var bd domain.SprintBurndown
+	_ = json.NewDecoder(rec.Body).Decode(&bd)
+	if bd.TotalSP != 8.0 || len(bd.Points) == 0 {
+		t.Fatalf("expected TotalSP=8.0 and non-empty burndown points, got %+v", bd)
+	}
+	lastPt := bd.Points[len(bd.Points)-1]
+	if lastPt.RemainingStoryPoints != 0 {
+		t.Fatalf("expected final RemainingStoryPoints=0 (both Task A and Task B done), got %v", lastPt.RemainingStoryPoints)
+	}
+
+	// 9. Test Atomic Sprint Rollover on Close
+	// Add an incomplete Task D to activeSprint (progress=10, status=todo, SP=4)
+	taskDBody, _ := json.Marshal(map[string]any{
+		"issue_id":     createdIssue.ID,
+		"title":        "Task D Incomplete",
+		"status_id":    todoStatusID,
+		"sprint_id":    activeSprint.ID,
+		"story_points": 4.0,
+		"progress":     10,
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", proj.ID), bytes.NewReader(taskDBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var taskD domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&taskD)
+
+	// Close activeSprint with rollover_action="next_sprint" (auto-creates next planned sprint and moves only Task D)
+	closeSprintBody, _ := json.Marshal(map[string]any{
+		"status":          "closed",
+		"rollover_action": "next_sprint",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/sprints/%s", activeSprint.ID), bytes.NewReader(closeSprintBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to close sprint with rollover (%d): %s", rec.Code, rec.Body.String())
+	}
+	var closedSprint domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&closedSprint)
+	if closedSprint.Status != "closed" || closedSprint.TaskCount != 2 || closedSprint.CompletedTaskCount != 2 {
+		t.Fatalf("expected closed sprint to retain 2 completed tasks, got %+v", closedSprint)
+	}
+
+	// Verify sprint_id=active now returns 0 issues since no active sprint exists
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=active", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var noActiveIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&noActiveIssues)
+	if len(noActiveIssues) != 0 {
+		t.Fatalf("expected 0 issues when no active sprint exists, got %d", len(noActiveIssues))
+	}
+
+	// Verify Task D was moved to the newly created planned sprint
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks/%s", proj.ID, taskD.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var movedTaskD domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&movedTaskD)
+	if movedTaskD.SprintID == nil || *movedTaskD.SprintID == "" || *movedTaskD.SprintID == activeSprint.ID {
+		t.Fatalf("expected Task D moved to new planned sprint, got %v", movedTaskD.SprintID)
+	}
+	nextSprintID := *movedTaskD.SprintID
+
+	// Close the new sprint with rollover_action="backlog" -> Task D becomes unassigned (sprint_id=nil)
+	closeBacklogBody, _ := json.Marshal(map[string]any{
+		"status":          "closed",
+		"rollover_action": "backlog",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/sprints/%s", nextSprintID), bytes.NewReader(closeBacklogBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to close sprint with backlog rollover (%d): %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks/%s", proj.ID, taskD.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	_ = json.NewDecoder(rec.Body).Decode(&movedTaskD)
+	if movedTaskD.SprintID != nil {
+		t.Fatalf("expected Task D sprint_id to be nil after backlog rollover, got %v", *movedTaskD.SprintID)
+	}
+}

@@ -279,6 +279,8 @@ CREATE TABLE IF NOT EXISTS issues (
     state VARCHAR(32) NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
     title VARCHAR(500) NOT NULL,
     description TEXT NOT NULL DEFAULT '',
+    premortem TEXT NOT NULL DEFAULT '',
+    postmortem TEXT NOT NULL DEFAULT '',
     display_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -502,3 +504,7 @@ WHERE NOT EXISTS (SELECT 1 FROM types WHERE project_id IS NULL AND name = '機�
 INSERT INTO types (id, project_id, name, color, display_order)
 SELECT gen_random_uuid(), NULL, '改善', '#f59e0b', 4
 WHERE NOT EXISTS (SELECT 1 FROM types WHERE project_id IS NULL AND name = '改善');
+
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS premortem TEXT NOT NULL DEFAULT '';
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS postmortem TEXT NOT NULL DEFAULT '';
+

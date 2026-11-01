@@ -87,6 +87,8 @@ const (
 	StdFieldActualCost   = "actual_cost"
 	StdFieldProgress     = "progress"
 	StdFieldType         = "type"
+	StdFieldPremortem    = "premortem"
+	StdFieldPostmortem   = "postmortem"
 )
 
 // Placeholder for unviewable fields (Method A)
@@ -264,17 +266,19 @@ type FieldPermissionState struct {
 }
 
 type IssueRollup struct {
-	PlannedStartDate  *string      `json:"planned_start_date"`
-	PlannedEndDate    *string      `json:"planned_end_date"`
-	ActualStartDate   *string      `json:"actual_start_date"`
-	ActualEndDate     *string      `json:"actual_end_date"`
-	TotalPlannedHours float64      `json:"total_planned_hours"`
-	TotalActualHours  float64      `json:"total_actual_hours"`
-	TotalPlannedCost  float64      `json:"total_planned_cost"`
-	TotalActualCost   float64      `json:"total_actual_cost"`
-	WeightedProgress  float64      `json:"weighted_progress"`
-	Assignees         []SubjectRef `json:"assignees"`
-	TaskCount         int          `json:"task_count"`
+	PlannedStartDate     *string      `json:"planned_start_date"`
+	PlannedEndDate       *string      `json:"planned_end_date"`
+	ActualStartDate      *string      `json:"actual_start_date"`
+	ActualEndDate        *string      `json:"actual_end_date"`
+	TotalPlannedHours    float64      `json:"total_planned_hours"`
+	TotalActualHours     float64      `json:"total_actual_hours"`
+	TotalPlannedCost     float64      `json:"total_planned_cost"`
+	TotalActualCost      float64      `json:"total_actual_cost"`
+	TotalStoryPoints     float64      `json:"total_story_points"`
+	CompletedStoryPoints float64      `json:"completed_story_points"`
+	WeightedProgress     float64      `json:"weighted_progress"`
+	Assignees            []SubjectRef `json:"assignees"`
+	TaskCount            int          `json:"task_count"`
 }
 
 type Issue struct {
@@ -287,6 +291,8 @@ type Issue struct {
 	State            string                          `json:"state"`
 	Title            string                          `json:"title"`
 	Description      *string                         `json:"description"`
+	Premortem        string                          `json:"premortem"`
+	Postmortem       string                          `json:"postmortem"`
 	LabelIDs         []string                        `json:"label_ids"`
 	CustomValues     map[string]json.RawMessage      `json:"custom_values"`
 	FieldPermissions map[string]FieldPermissionState `json:"field_permissions"`
@@ -456,19 +462,21 @@ const (
 )
 
 type Sprint struct {
-	ID                string    `json:"id"`
-	ProjectID         string    `json:"project_id"`
-	Name              string    `json:"name"`
-	Goal              *string   `json:"goal"`
-	StartDate         *string   `json:"start_date"`
-	EndDate           *string   `json:"end_date"`
-	Status            string    `json:"status"`
-	TaskCount         int       `json:"task_count"`
-	TotalStoryPoints  float64   `json:"total_story_points"`
-	TotalPlannedHours float64   `json:"total_planned_hours"`
-	TotalActualHours  float64   `json:"total_actual_hours"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                   string    `json:"id"`
+	ProjectID            string    `json:"project_id"`
+	Name                 string    `json:"name"`
+	Goal                 *string   `json:"goal"`
+	StartDate            *string   `json:"start_date"`
+	EndDate              *string   `json:"end_date"`
+	Status               string    `json:"status"`
+	TaskCount            int       `json:"task_count"`
+	CompletedTaskCount   int       `json:"completed_task_count"`
+	TotalStoryPoints     float64   `json:"total_story_points"`
+	CompletedStoryPoints float64   `json:"completed_story_points"`
+	TotalPlannedHours    float64   `json:"total_planned_hours"`
+	TotalActualHours     float64   `json:"total_actual_hours"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type BurndownDataPoint struct {

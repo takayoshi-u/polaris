@@ -172,6 +172,20 @@
           </select>
         </div>
 
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <span style="color: var(--text-muted);">スプリント:</span>
+          <select v-model="filters.sprint_id" @change="loadIssues">
+            <option value="">すべて</option>
+            <option value="active">⚡ アクティブスプリントのみ</option>
+            <option value="unassigned">未割当 (バックログ)</option>
+            <optgroup v-if="sprints.length > 0" label="各スプリント">
+              <option v-for="sp in sprints" :key="sp.id" :value="sp.id">
+                {{ sp.status === 'active' ? '⚡ ' : sp.status === 'closed' ? '✓ ' : '📅 ' }}{{ sp.name }}
+              </option>
+            </optgroup>
+          </select>
+        </div>
+
         <!-- AND Label Multi-Select Pills -->
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px;">
           <span style="color: var(--text-muted);">ラベル(AND):</span>
@@ -380,6 +394,12 @@
                     {{ formatCost(iss.rollup.total_planned_cost) }} / {{ formatCost(iss.rollup.total_actual_cost) }}
                   </strong>
                 </div>
+                <div>
+                  <span style="color: var(--text-muted);">SP集計(完/計):</span>
+                  <strong style="margin-left: 4px; color: #7c3aed;">
+                    {{ iss.rollup.completed_story_points || 0 }} / {{ iss.rollup.total_story_points || 0 }} SP
+                  </strong>
+                </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span style="color: var(--text-muted);">加重平均進捗:</span>
                   <div style="width: 80px; height: 8px; border-radius: 999px; background: var(--border-color); overflow: hidden;">
@@ -447,7 +467,12 @@
                         </span>
                         <span style="font-size: 14px; font-weight: 700;">{{ t.title }}</span>
                       </div>
-                      <span class="badge badge-blue">{{ t.progress }}%</span>
+                      <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                        <span v-if="t.story_points !== null && t.story_points !== undefined && t.story_points !== ''" class="badge badge-purple" style="font-size: 11px;">
+                          {{ t.story_points }} SP
+                        </span>
+                        <span class="badge badge-blue">{{ t.progress }}%</span>
+                      </div>
                     </div>
 
                     <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">
@@ -541,6 +566,14 @@
             <div style="flex: 1;">課題 / タスク階層</div>
             <div style="width: 96px; text-align: right;">予定/実績(h)</div>
             <div style="width: 54px; text-align: right;">進捗</div>
+          </div>
+          <!-- Sprint Period Left Label Row -->
+          <div
+            v-if="sprintsWithDates.length > 0"
+            class="gantt-row"
+            style="height: 24px; background: rgba(124, 58, 237, 0.06); padding: 0 12px; font-size: 11px; font-weight: 700; color: #7c3aed;"
+          >
+            <div>🏃 スプリント期間</div>
           </div>
 
           <template v-for="iss in issues" :key="`g-left-${iss.id}`">
@@ -664,10 +697,10 @@
               <!-- Upper Tier: Month / Year -->
               <div style="display: flex; height: 22px; border-bottom: 1px solid var(--border-color);">
                 <div
-                  v-for="(mg, mIdx) in ganttMonthGroups"
-                  :key="mIdx"
+                  v-for="(ug, uIdx) in ganttHeaderGroups.upperGroups"
+                  :key="ug.key || uIdx"
                   :style="{
-                    width: `${mg.widthPx}px`,
+                    width: `${ug.widthPx}px`,
                     height: '100%',
                     borderRight: '1px solid var(--border-color)',
                     display: 'flex',
@@ -681,30 +714,69 @@
                     whiteSpace: 'nowrap'
                   }"
                 >
-                  {{ mg.label }}
+                  {{ ug.label }}
                 </div>
               </div>
-              <!-- Lower Tier: Day and Weekday -->
+              <!-- Lower Tier: Day / Week / Month Buckets -->
               <div style="display: flex; height: 22px;">
                 <div
-                  v-for="ymd in timelineDays"
-                  :key="ymd"
+                  v-for="lg in ganttHeaderGroups.lowerGroups"
+                  :key="lg.key"
                   :style="{
-                    width: `${ganttDayWidth}px`,
+                    width: `${lg.widthPx}px`,
                     height: '100%',
                     borderRight: '1px solid var(--border-color)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '10px',
-                    background: isWeekend(ymd) ? 'rgba(100, 116, 139, 0.08)' : 'transparent',
-                    color: ymd === todayYMD ? 'var(--primary)' : isWeekend(ymd) ? 'var(--text-muted)' : 'var(--text-main)',
-                    fontWeight: ymd === todayYMD ? '700' : '400'
+                    background: lg.isWeekend ? 'rgba(100, 116, 139, 0.08)' : 'transparent',
+                    color: (todayYMD >= lg.startYMD && todayYMD <= lg.endYMD) ? 'var(--primary)' : lg.isWeekend ? 'var(--text-muted)' : 'var(--text-main)',
+                    fontWeight: (todayYMD >= lg.startYMD && todayYMD <= lg.endYMD) ? '700' : '400',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
                   }"
                 >
-                  {{ ymd.slice(8) }} ({{ ['日', '月', '火', '水', '木', '金', '土'][new Date(ymd).getDay()] }})
+                  {{ lg.label }}
                 </div>
               </div>
+            </div>
+
+            <!-- Sprint Period Overlay Band Row -->
+            <div
+              v-if="sprintsWithDates.length > 0"
+              class="gantt-row"
+              style="height: 24px; position: relative; background: rgba(124, 58, 237, 0.04); padding: 0;"
+            >
+              <template v-for="sp in sprintsWithDates" :key="`gantt-sp-${sp.id}`">
+                <div
+                  v-if="getBarPos(sp.start_date, sp.end_date).visible"
+                  :style="{
+                    position: 'absolute',
+                    top: '2px',
+                    height: '19px',
+                    left: `${getBarPos(sp.start_date, sp.end_date).leftPx}px`,
+                    width: `${getBarPos(sp.start_date, sp.end_date).widthPx}px`,
+                    borderRadius: '4px',
+                    background: sp.status === 'active' ? 'rgba(16, 185, 129, 0.22)' : 'rgba(124, 58, 237, 0.18)',
+                    border: sp.status === 'active' ? '1px solid #10b981' : '1px solid #8b5cf6',
+                    color: sp.status === 'active' ? '#047857' : '#6d28d9',
+                    fontSize: '10px',
+                    fontWeight: '700',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0 6px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    zIndex: 3
+                  }"
+                  :title="`🏃 ${sp.name} (${sp.start_date} 〜 ${sp.end_date})`"
+                >
+                  🏃 {{ sp.name }} ({{ sp.start_date?.slice(5) }}〜{{ sp.end_date?.slice(5) }})
+                </div>
+              </template>
             </div>
 
             <template v-for="iss in issues" :key="`g-right-${iss.id}`">
@@ -741,18 +813,18 @@
               >
                 <!-- Background Date Cells (supports drag-to-create when dates unset) -->
                 <div
-                  v-for="ymd in timelineDays"
-                  :key="`cell-${t.id}-${ymd}`"
+                  v-for="lg in ganttHeaderGroups.lowerGroups"
+                  :key="`cell-${t.id}-${lg.key}`"
                   :style="{
-                    width: `${ganttDayWidth}px`,
+                    width: `${lg.widthPx}px`,
                     height: '100%',
                     borderRight: '1px solid var(--border-color)',
-                    background: isWeekend(ymd) ? 'rgba(100, 116, 139, 0.04)' : 'transparent',
+                    background: lg.isWeekend ? 'rgba(100, 116, 139, 0.04)' : 'transparent',
                     cursor: !t.planned_start_date ? 'crosshair' : 'default'
                   }"
-                  :title="!t.planned_start_date ? `${ymd} を起点にドラッグして予定期間を作成` : ymd"
-                  @mousedown="onCellMouseDownCreate(t, ymd)"
-                  @mouseup="onCellMouseUpCreate(t, ymd)"
+                  :title="!t.planned_start_date ? `${lg.startYMD} を起点にドラッグして予定期間を作成` : lg.label"
+                  @mousedown="onCellMouseDownCreate(t, lg.startYMD)"
+                  @mouseup="onCellMouseUpCreate(t, lg.endYMD)"
                 ></div>
 
                 <!-- Planned Bar (Upper, Draggable & Resizable) -->
@@ -1757,13 +1829,17 @@ import type {
 } from '~/types/polaris'
 import {
   addDaysYMD,
+  buildGanttHeaderGroups,
   calcGanttBarPosition,
   calculateAutoScheduleUpdates,
   calculateGanttDependencyPath,
   formatCost,
   formatHours,
+  formatLocalYMD,
   generateDateRangeYMD,
-  hasAtMostTwoDecimals
+  getGanttScaleConfig,
+  hasAtMostTwoDecimals,
+  isTaskCompleted
 } from '~/utils/format'
 import {
   calculateColumnOffset,
@@ -1846,6 +1922,7 @@ const projectGroups = ref<Group[]>([])
 const globalGroups = ref<Group[]>([])
 const users = ref<User[]>([])
 const issues = ref<Issue[]>([])
+const allProjectIssues = ref<Issue[]>([])
 const sprints = ref<Sprint[]>([])
 const dependencies = ref<TaskDependency[]>([])
 const projectTypes = ref<ItemType[]>([])
@@ -1860,8 +1937,9 @@ const autoScheduleEnabled = ref(true)
 const showDependencyLines = ref(true)
 
 const allTasks = computed<Task[]>(() => {
+  const sourceIssues = allProjectIssues.value.length > 0 ? allProjectIssues.value : issues.value
   const list: Task[] = []
-  for (const iss of issues.value) {
+  for (const iss of sourceIssues) {
     for (const t of iss.tasks || []) {
       list.push(t)
     }
@@ -1869,16 +1947,21 @@ const allTasks = computed<Task[]>(() => {
   return list
 })
 
+const sprintsWithDates = computed(() => {
+  return sprints.value.filter(sp => sp.start_date && sp.end_date)
+})
+
 const ganttDependencyLines = computed(() => {
   if (!showDependencyLines.value || dependencies.value.length === 0) return []
 
+  const headerOffset = sprintsWithDates.value.length > 0 ? 68 : 44
   let currentRowIndex = 0
   const taskRowYMap = new Map<string, number>()
 
   for (const iss of issues.value) {
     currentRowIndex++
     for (const t of iss.tasks || []) {
-      const topY = 44 + (currentRowIndex * 62)
+      const topY = headerOffset + (currentRowIndex * 62)
       taskRowYMap.set(t.id, topY + 20)
       currentRowIndex++
     }
@@ -1938,9 +2021,13 @@ async function triggerAutoSchedule(changedTaskId: string, newEndDate: string) {
 }
 
 function openTaskDetailStandalone(t: Task) {
-  let parentIss = issues.value.find(i => (i.tasks || []).some(x => x.id === t.id))
+  let parentIss =
+    issues.value.find(i => (i.tasks || []).some(x => x.id === t.id)) ||
+    allProjectIssues.value.find(i => (i.tasks || []).some(x => x.id === t.id))
   if (!parentIss && t.issue_id) {
-    parentIss = issues.value.find(i => i.id === t.issue_id)
+    parentIss =
+      issues.value.find(i => i.id === t.issue_id) ||
+      allProjectIssues.value.find(i => i.id === t.issue_id)
   }
   openTaskDetail(t, parentIss || ({ id: t.issue_id, title: '親課題' } as any))
 }
@@ -1980,6 +2067,7 @@ const filters = reactive({
   type_id: '',
   status_id: '',
   assignee_id: '',
+  sprint_id: '',
   keyword: '',
   label_ids: [] as string[]
 })
@@ -2029,9 +2117,7 @@ let timelineResizeObserver: ResizeObserver | null = null
 
 const ganttScale = ref<'day' | 'week' | 'month'>('day')
 const baseDayWidth = computed(() => {
-  if (ganttScale.value === 'day') return 48
-  if (ganttScale.value === 'week') return 28
-  return 36 // Expanded month cell width (formerly 14)
+  return getGanttScaleConfig(ganttScale.value).baseDayWidth
 })
 
 const ganttDayWidth = computed(() => {
@@ -2043,29 +2129,16 @@ const ganttDayWidth = computed(() => {
   }
   return baseDayWidth.value
 })
-const todayYMD = new Date().toISOString().slice(0, 10)
+const todayYMD = formatLocalYMD()
 const timelineStartYMD = ref(addDaysYMD(todayYMD, -5))
 const timelineDays = computed(() => {
-  const count = ganttScale.value === 'day' ? 28 : ganttScale.value === 'week' ? 45 : 60
+  const count = getGanttScaleConfig(ganttScale.value).count
   return generateDateRangeYMD(timelineStartYMD.value, count)
 })
 const createDragStartYMD = ref<string | null>(null)
 
-const ganttMonthGroups = computed(() => {
-  const groups: { label: string; count: number; widthPx: number }[] = []
-  for (const ymd of timelineDays.value) {
-    const ym = ymd.slice(0, 7)
-    const [year, month] = ym.split('-')
-    const label = `${year}年 ${parseInt(month, 10)}月`
-    const last = groups[groups.length - 1]
-    if (last && last.label === label) {
-      last.count++
-      last.widthPx += ganttDayWidth.value
-    } else {
-      groups.push({ label, count: 1, widthPx: ganttDayWidth.value })
-    }
-  }
-  return groups
+const ganttHeaderGroups = computed(() => {
+  return buildGanttHeaderGroups(timelineDays.value, ganttScale.value, ganttDayWidth.value)
 })
 
 function isWeekend(ymd: string): boolean {
@@ -2089,11 +2162,7 @@ function scrollToToday() {
 
 function isTaskOverdue(t: Task): boolean {
   if (!t.planned_end_date) return false
-  if (t.progress >= 100) return false
-  const st = statuses.value.find(s => s.id === t.status_id)
-  if (st && (st.name.includes('完了') || st.name.toLowerCase().includes('done') || st.name.toLowerCase().includes('close'))) {
-    return false
-  }
+  if (isTaskCompleted(t, statuses.value)) return false
   return t.planned_end_date < todayYMD
 }
 
@@ -2496,12 +2565,33 @@ async function loadIssues() {
   if (filters.type_id) params.set('type_id', filters.type_id)
   if (filters.status_id) params.set('status_id', filters.status_id)
   if (filters.assignee_id) params.set('assignee_id', filters.assignee_id)
+  if (filters.sprint_id) params.set('sprint_id', filters.sprint_id)
   if (filters.keyword.trim()) params.set('keyword', filters.keyword.trim())
   if (filters.label_ids.length > 0) params.set('label_ids', filters.label_ids.join(','))
 
+  const hasTaskFilters = Boolean(
+    filters.type_id ||
+    filters.status_id ||
+    filters.assignee_id ||
+    filters.sprint_id ||
+    filters.keyword.trim() ||
+    filters.label_ids.length > 0
+  )
+  const isUnfilteredAll = !hasTaskFilters && filters.issue_state === 'all'
+
   try {
-    const list = await apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`)
-    issues.value = list || []
+    if (isUnfilteredAll) {
+      const list = await apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`)
+      issues.value = list || []
+      allProjectIssues.value = issues.value
+    } else {
+      const [list, allList] = await Promise.all([
+        apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`),
+        apiFetch<Issue[]>(`/projects/${projectId.value}/issues?state=all`).catch(() => null)
+      ])
+      issues.value = list || []
+      allProjectIssues.value = allList !== null ? allList : issues.value
+    }
   } catch (e: any) {
     notifyToast(e.message, 'error')
   }
@@ -3295,7 +3385,7 @@ async function exportProjectCSV() {
     const a = document.createElement('a')
     a.href = url
     const pName = (project.value?.name || 'project').replace(/[^\w\s-]/gi, '_')
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const today = formatLocalYMD().replace(/-/g, '')
     a.download = `polaris_${pName}_${today}.csv`
     document.body.appendChild(a)
     a.click()

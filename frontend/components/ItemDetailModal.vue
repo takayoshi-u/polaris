@@ -1,7 +1,7 @@
 <template>
   <div class="item-detail-page-view" style="display: flex; flex-direction: column; gap: 16px; width: 100%;">
     <!-- Top Breadcrumb / Back Navigation Bar -->
-    <div class="card" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px;">
+    <div class="card" style="position: sticky; top: 0; z-index: 25; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);">
       <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
         <button
           type="button"
@@ -193,6 +193,10 @@
         <div>
           <span style="color: var(--text-muted);">合計予定/実績コスト:</span>
           <strong style="margin-left: 6px;">{{ formatCost(issue.rollup.total_planned_cost) }} / {{ formatCost(issue.rollup.total_actual_cost) }}</strong>
+        </div>
+        <div>
+          <span style="color: var(--text-muted);">SP集計(完/計):</span>
+          <strong style="margin-left: 6px; color: #7c3aed;">{{ issue.rollup.completed_story_points || 0 }} / {{ issue.rollup.total_story_points || 0 }} SP</strong>
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="color: var(--text-muted);">加重平均進捗 ({{ issue.rollup.task_count }}タスク):</span>
@@ -595,6 +599,154 @@
         </div>
       </div>
 
+      <!-- Issue Pre-mortem & Post-mortem Section (Issue Only) -->
+      <div v-if="targetType === 'issue'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+            <span>🛡️ プレモーテム（事前リスク予測） ＆ 🔍 ポストモーテム（事後振り返り）</span>
+          </h3>
+          <span style="font-size: 12px; color: var(--text-muted);">
+            計画時の失敗シナリオ予測と、完了時のKPT・実績振り返りを記録できます
+          </span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+          <!-- Card 1: Pre-mortem -->
+          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+              <strong style="font-size: 13px;">🛡️ プレモーテム（事前リスク予測・予防策）</strong>
+              <button
+                v-if="canEditAny"
+                type="button"
+                class="btn btn-secondary btn-sm"
+                style="font-size: 11px; padding: 2px 8px;"
+                @click="insertPremortemTemplate"
+              >
+                📋 テンプレート挿入
+              </button>
+            </div>
+
+            <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="premortemTab === 'write' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="premortemTab = 'write'"
+              >
+                編集 (Write)
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="premortemTab === 'preview' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="premortemTab = 'preview'"
+              >
+                プレビュー (Preview)
+              </button>
+            </div>
+
+            <textarea
+              v-if="premortemTab === 'write'"
+              v-model="form.premortem"
+              rows="7"
+              :disabled="!isKeyEditable('premortem')"
+              style="width: 100%; font-size: 12px;"
+              placeholder="プロジェクトや課題が失敗するとしたら何が原因か？事前のリスクシナリオと予防策を記述..."
+            ></textarea>
+            <div
+              v-else
+              class="markdown-body"
+              style="padding: 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); min-height: 140px; font-size: 13px;"
+              v-html="renderSafeMarkdown(form.premortem || '*(プレモーテムの記述がありません)*')"
+            ></div>
+          </div>
+
+          <!-- Card 2: Post-mortem -->
+          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+              <strong style="font-size: 13px;">🔍 ポストモーテム（事後検証・振り返り）</strong>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <button
+                  v-if="canEditAny"
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  style="font-size: 11px; padding: 2px 8px;"
+                  @click="insertPostmortemTemplate"
+                >
+                  📋 テンプレート挿入（実績引用）
+                </button>
+                <button
+                  v-if="canEditAny"
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  style="font-size: 11px; padding: 2px 8px;"
+                  :disabled="isExportingWiki"
+                  @click="exportPostmortemToWiki"
+                >
+                  📚 Wikiへ振り返り記事として保存
+                </button>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="postmortemTab === 'write' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="postmortemTab = 'write'"
+              >
+                編集 (Write)
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="postmortemTab === 'preview' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="postmortemTab = 'preview'"
+              >
+                プレビュー (Preview)
+              </button>
+            </div>
+
+            <textarea
+              v-if="postmortemTab === 'write'"
+              v-model="form.postmortem"
+              rows="7"
+              :disabled="!isKeyEditable('postmortem')"
+              style="width: 100%; font-size: 12px;"
+              placeholder="予実ギャップの分析やKPT (Keep / Problem / Try)、次への学びを記述..."
+            ></textarea>
+            <div
+              v-else
+              class="markdown-body"
+              style="padding: 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); min-height: 140px; font-size: 13px;"
+              v-html="renderSafeMarkdown(form.postmortem || '*(ポストモーテムの記述がありません)*')"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Static Form-Bottom Save Bar -->
+      <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 8px; border-top: 1px dashed var(--border-color);">
+        <span v-if="isDirty" style="font-size: 12px; color: var(--warning, #d97706); font-weight: 600;">
+          ● 未保存の変更があります
+        </span>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          :class="{ 'btn-dirty': isDirty }"
+          :disabled="!canEditAny || isSaving"
+          @click="saveItem"
+        >
+          <span v-if="isSaving">⏳ 保存中...</span>
+          <span v-else-if="saveSuccess">✓ 保存完了</span>
+          <span v-else>変更を保存</span>
+        </button>
+      </div>
+
       <!-- Task Dependencies Section (Task Only) -->
       <div v-if="targetType === 'task'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
@@ -974,6 +1126,31 @@
       </template>
     </div>
 
+    <!-- Sticky/Floating Unsaved Changes Bottom Bar -->
+    <div
+      v-if="isDirty && canEditAny"
+      class="card"
+      style="position: sticky; bottom: 12px; z-index: 25; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border: 2px solid var(--primary); background: var(--bg-card); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);"
+    >
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--text-main);">
+        <span style="color: var(--warning, #d97706);">●</span>
+        <span>未保存の変更があります</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          :class="{ 'btn-dirty': isDirty }"
+          :disabled="!canEditAny || isSaving"
+          @click="saveItem"
+        >
+          <span v-if="isSaving">⏳ 保存中...</span>
+          <span v-else-if="saveSuccess">✓ 保存完了</span>
+          <span v-else>変更を保存 (Ctrl+S)</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Lightbox Modal -->
     <div v-if="lightboxAtt" class="lightbox-backdrop" @click="lightboxAtt = null">
       <div class="lightbox-container" @click.stop>
@@ -1011,7 +1188,7 @@ import type {
   TemplateRow,
   User
 } from '~/types/polaris'
-import { formatCost, formatFileSize, formatHours, formatJSTDateTime, hasAtMostTwoDecimals, renderSafeMarkdown } from '~/utils/format'
+import { formatCost, formatFileSize, formatHours, formatJSTDateTime, formatLocalYMD, hasAtMostTwoDecimals, renderSafeMarkdown } from '~/utils/format'
 
 const props = defineProps<{
   projectId: string
@@ -1091,7 +1268,7 @@ async function onOwnerSelectChange(newOwnerId: string) {
   await transferOwner(newOwnerId)
 }
 
-const todayStr = computed(() => new Date().toISOString().slice(0, 10))
+const todayStr = computed(() => formatLocalYMD())
 function setTodayAsActualEnd() {
   form.actual_end_date = todayStr.value
 }
@@ -1136,6 +1313,8 @@ async function copyItemUrl() {
 const form = reactive({
   title: '',
   description: '',
+  premortem: '',
+  postmortem: '',
   state: 'open' as 'open' | 'closed',
   template_id: '' as string | null,
   type_id: '' as string,
@@ -1155,6 +1334,77 @@ const form = reactive({
   label_ids: [] as string[],
   custom_values: {} as Record<string, any>
 })
+
+const premortemTab = ref<'write' | 'preview'>('write')
+const postmortemTab = ref<'write' | 'preview'>('write')
+const isExportingWiki = ref(false)
+
+function insertPremortemTemplate() {
+  const tpl = `### 1. 想定される失敗シナリオ\n- スケジュール遅延や要件の膨張が発生するケース:\n- 技術的ボトルネック・依存関係によるブロッカー:\n\n### 2. 影響度・発生要因\n- 発生確率 / 影響度:\n- 潜在的な原因:\n\n### 3. 事前予防アクション\n- [ ] 早期プロトタイプ検証とマイルストーン確認\n- [ ] リスク顕在化時のエスカレーション基準の合意\n`
+  if (!form.premortem.trim()) {
+    form.premortem = tpl
+  } else {
+    form.premortem = `${form.premortem.trimEnd()}\n\n${tpl}`
+  }
+  premortemTab.value = 'write'
+}
+
+function buildPostmortemSummaryMarkdown(): string {
+  const r = props.issue?.rollup
+  const pDates = `${r?.planned_start_date || '-'} 〜 ${r?.planned_end_date || '-'}`
+  const aDates = `${r?.actual_start_date || '-'} 〜 ${r?.actual_end_date || '-'}`
+  const pHours = formatHours(r?.total_planned_hours)
+  const aHours = formatHours(r?.total_actual_hours)
+  const cSP = r?.completed_story_points ?? 0
+  const tSP = r?.total_story_points ?? 0
+  const prog = r ? r.weighted_progress.toFixed(1) : '0.0'
+
+  return `## 📊 実績サマリー（自動引用）
+- **予定期間 vs 実績期間**: ${pDates} ／ ${aDates}
+- **予定工数 vs 実績工数**: ${pHours}h ／ ${aHours}h
+- **完了SP / 合計SP**: ${cSP} / ${tSP} SP
+- **進捗率**: ${prog}% (${r?.task_count ?? 0} タスク)
+
+### Keep (良かったこと・継続すべきこと)
+- 
+
+### Problem (発生した問題・根本原因)
+- 
+
+### Try (再発防止・次への改善アクション)
+- [ ] 
+`
+}
+
+function insertPostmortemTemplate() {
+  const tpl = buildPostmortemSummaryMarkdown()
+  if (!form.postmortem.trim()) {
+    form.postmortem = tpl
+  } else {
+    form.postmortem = `${form.postmortem.trimEnd()}\n\n${tpl}`
+  }
+  postmortemTab.value = 'write'
+}
+
+async function exportPostmortemToWiki() {
+  if (isExportingWiki.value) return
+  isExportingWiki.value = true
+  try {
+    const content = form.postmortem.trim() || buildPostmortemSummaryMarkdown()
+    await apiFetch(`/projects/${props.projectId}/wiki`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: `[振り返り] ${form.title || '課題振り返り'}`,
+        content
+      })
+    })
+    notifyToast('Wikiに振り返りページを作成しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message || 'Wikiへの保存に失敗しました', 'error')
+  } finally {
+    isExportingWiki.value = false
+  }
+}
 
 const selectedType = computed<ItemType | null>(() => {
   if (!form.type_id) return null
@@ -1250,6 +1500,8 @@ function initForm() {
   if (props.targetType === 'issue' && props.issue) {
     form.title = props.issue.title
     form.description = props.issue.description || ''
+    form.premortem = props.issue.premortem || ''
+    form.postmortem = props.issue.postmortem || ''
     form.state = props.issue.state
     form.template_id = props.issue.template_id || applicableTemplates.value[0]?.id || null
     form.type_id = props.issue.type_id || ''
@@ -1385,6 +1637,8 @@ async function saveItem() {
       const payload: Record<string, any> = {}
       if (isKeyEditable('title')) payload.title = form.title
       if (isKeyEditable('description')) payload.description = form.description
+      if (isKeyEditable('premortem')) payload.premortem = form.premortem
+      if (isKeyEditable('postmortem')) payload.postmortem = form.postmortem
       if (isKeyEditable('state')) payload.state = form.state
       if (form.template_id) payload.template_id = form.template_id
       payload.type_id = form.type_id || null
@@ -1763,7 +2017,9 @@ function onKeydown(e: KeyboardEvent) {
   // Shortcut: Ctrl+S or Cmd+S
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
     e.preventDefault()
-    saveItem()
+    if (canEditAny.value && !isSaving.value) {
+      saveItem()
+    }
     return
   }
 

@@ -10,7 +10,7 @@
       </div>
 
       <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
-        <!-- Tab Mode: Planning vs Burndown -->
+        <!-- Tab Mode: Planning vs Burndown vs Velocity -->
         <div style="display: flex; gap: 4px; padding: 2px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-color);">
           <button
             type="button"
@@ -27,6 +27,14 @@
             @click="subTab = 'burndown'"
           >
             📈 バーンダウンチャート
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm"
+            :class="subTab === 'velocity' ? 'btn-primary' : 'btn-ghost'"
+            @click="subTab = 'velocity'"
+          >
+            📊 ベロシティ推移
           </button>
         </div>
 
@@ -62,10 +70,14 @@
           </p>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <div style="display: flex; gap: 8px; font-size: 12px;">
-            <span class="badge badge-purple">{{ activeSprintStoryPoints }} SP</span>
-            <span class="badge badge-blue">{{ activeSprintTasks.length }} タスク</span>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px;">
+            <span class="badge badge-purple">
+              ⚡ 消化 {{ activeSprintCompletedSP }} / {{ activeSprintStoryPoints }} SP ({{ activeSprintCompletionRate }}%)
+            </span>
+            <span class="badge badge-blue">
+              完了 {{ activeSprintCompletedTaskCount }} / {{ activeSprintTaskCount }} タスク
+            </span>
             <span class="badge badge-slate">{{ formatHours(activeSprintPlannedHours) }}h</span>
           </div>
           <button
@@ -192,12 +204,29 @@
             </div>
 
             <!-- Sprint Metrics Bar -->
-            <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; padding: 6px 10px; background: var(--bg-input); border-radius: 6px;">
-              <span>タスク: <strong>{{ getTasksForSprint(sp.id).length }}</strong> 件</span>
-              <span>・</span>
-              <span>SP: <strong>{{ getSprintTotalSP(sp.id) }}</strong></span>
-              <span>・</span>
-              <span>予定工数: <strong>{{ formatHours(getSprintTotalPlannedHours(sp.id)) }}</strong>h</span>
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px; padding: 8px 10px; background: var(--bg-input); border-radius: 6px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                  <span>タスク: <strong>{{ getSprintCompletedTaskCount(sp.id) }} / {{ getSprintTaskCount(sp.id) }}</strong> 件完了</span>
+                  <span>・</span>
+                  <span>SP(完/計): <strong style="color: #7c3aed;">{{ getSprintCompletedSP(sp.id) }} / {{ getSprintTotalSP(sp.id) }} SP ({{ getSprintCompletionRate(sp.id) }}%)</strong></span>
+                  <span>・</span>
+                  <span>予定工数: <strong>{{ formatHours(getSprintTotalPlannedHours(sp.id)) }}</strong>h</span>
+                </div>
+                <span v-if="sp.status === 'closed'" class="badge badge-green" style="font-size: 10px; font-weight: 700;">
+                  🏆 確定ベロシティ: {{ getSprintCompletedSP(sp.id) }} SP
+                </span>
+              </div>
+              <div style="width: 100%; height: 5px; border-radius: 999px; background: var(--border-color); overflow: hidden;">
+                <div
+                  :style="{
+                    width: `${Math.min(getSprintCompletionRate(sp.id), 100)}%`,
+                    height: '100%',
+                    backgroundColor: '#7c3aed',
+                    transition: 'width 0.2s ease'
+                  }"
+                ></div>
+              </div>
             </div>
 
             <!-- Tasks in this sprint -->
@@ -237,16 +266,31 @@
                   ></span>
                   <span
                     style="font-weight: 500; cursor: pointer; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                    :style="{ textDecoration: isTaskDone(t) ? 'line-through' : 'none', opacity: isTaskDone(t) ? 0.75 : 1 }"
                     @click="$emit('open-task', t)"
                   >
                     {{ t.title }}
                   </span>
-                  <span v-if="t.story_points" class="badge badge-purple" style="font-size: 10px; padding: 1px 4px; flex-shrink: 0;">
+                  <span v-if="!canEdit && t.story_points" class="badge badge-purple" style="font-size: 10px; padding: 1px 4px; flex-shrink: 0;">
                     {{ t.story_points }} SP
                   </span>
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                  <!-- Inline SP Quick-Setter -->
+                  <select
+                    v-if="canEdit"
+                    :value="t.story_points ?? ''"
+                    style="font-size: 11px; padding: 1px 4px; border-radius: 4px; width: 76px;"
+                    title="ストーリーポイント (SP) を即時設定"
+                    @click.stop
+                    @change="onQuickSPChange(t, $event)"
+                  >
+                    <option value="">SP未設定</option>
+                    <option v-for="spOpt in getSPOptions(t.story_points)" :key="spOpt" :value="spOpt">
+                      {{ spOpt }} SP
+                    </option>
+                  </select>
                   <button
                     v-if="canEdit"
                     type="button"
@@ -327,7 +371,20 @@
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-                  <span v-if="t.story_points" class="badge badge-purple" style="font-size: 11px;">
+                  <select
+                    v-if="canEdit"
+                    :value="t.story_points ?? ''"
+                    style="font-size: 11px; padding: 1px 4px; border-radius: 4px; width: 78px;"
+                    title="ストーリーポイント (SP) を即時設定"
+                    @click.stop
+                    @change="onQuickSPChange(t, $event)"
+                  >
+                    <option value="">SP未設定</option>
+                    <option v-for="spOpt in getSPOptions(t.story_points)" :key="spOpt" :value="spOpt">
+                      {{ spOpt }} SP
+                    </option>
+                  </select>
+                  <span v-else-if="t.story_points" class="badge badge-purple" style="font-size: 11px;">
                     {{ t.story_points }} SP
                   </span>
                   <span class="badge badge-slate" style="font-size: 11px;">
@@ -512,6 +569,209 @@
       </div>
     </div>
 
+    <!-- SUBVIEW 3: VELOCITY CHART AREA -->
+    <div v-else-if="subTab === 'velocity'" class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+        <div>
+          <h3 style="font-size: 15px; font-weight: 700;">📊 スプリント・ベロシティ推移（計画SP vs 完了SP）</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin: 2px 0 0 0;">
+            各スプリントにおける計画ストーリーポイントと消化（完了）ストーリーポイントの推移を比較します
+          </p>
+        </div>
+      </div>
+
+      <!-- KPI Summary Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+        <div style="padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input);">
+          <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">平均ベロシティ (Closed平均)</div>
+          <div style="font-size: 22px; font-weight: 700; color: #7c3aed; margin-top: 4px;">
+            {{ velocityStats.averageVelocity }} <span style="font-size: 13px; font-weight: 600;">SP / スプリント</span>
+          </div>
+        </div>
+        <div style="padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input);">
+          <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">直近スプリント消化 SP</div>
+          <div style="font-size: 22px; font-weight: 700; color: var(--primary); margin-top: 4px;">
+            {{ velocityStats.recentVelocity }} <span style="font-size: 13px; font-weight: 600;">SP</span>
+          </div>
+        </div>
+        <div style="padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input);">
+          <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">全体平均SP消化率 (%)</div>
+          <div style="font-size: 22px; font-weight: 700; color: var(--success); margin-top: 4px;">
+            {{ velocityStats.overallCompletionRate }}%
+          </div>
+        </div>
+      </div>
+
+      <div v-if="velocityStats.sprints.length === 0" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px;">
+        スプリントデータがありません
+      </div>
+
+      <template v-else>
+        <!-- Grouped Bar Chart -->
+        <div style="padding: 16px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-main); display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 16px; font-size: 12px;">
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span style="width: 12px; height: 12px; border-radius: 3px; background: #94a3b8; display: inline-block;"></span>
+              <span style="color: var(--text-muted);">計画 SP (Planned)</span>
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              <span style="width: 12px; height: 12px; border-radius: 3px; background: #7c3aed; display: inline-block;"></span>
+              <span style="font-weight: 600; color: #7c3aed;">完了 SP (Completed)</span>
+            </span>
+          </div>
+
+          <div style="display: flex; align-items: flex-end; gap: 20px; min-height: 200px; padding: 16px 8px 4px 8px; overflow-x: auto; border-bottom: 1px solid var(--border-color);">
+            <div
+              v-for="item in velocityStats.sprints"
+              :key="item.id"
+              style="flex: 1; min-width: 90px; display: flex; flex-direction: column; align-items: center; gap: 6px;"
+            >
+              <div style="display: flex; align-items: flex-end; justify-content: center; gap: 8px; height: 150px; width: 100%;">
+                <!-- Planned Bar -->
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                  <span style="font-size: 10px; color: var(--text-muted); font-weight: 600;">{{ item.plannedSP }}</span>
+                  <div
+                    :style="{
+                      width: '24px',
+                      height: `${Math.max((item.plannedSP / maxVelocitySP) * 125, 4)}px`,
+                      background: '#94a3b8',
+                      borderRadius: '4px 4px 0 0',
+                      transition: 'height 0.2s ease'
+                    }"
+                    :title="`${item.name} 計画: ${item.plannedSP} SP`"
+                  ></div>
+                </div>
+                <!-- Completed Bar -->
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                  <span style="font-size: 10px; color: #7c3aed; font-weight: 700;">{{ item.completedSP }}</span>
+                  <div
+                    :style="{
+                      width: '24px',
+                      height: `${Math.max((item.completedSP / maxVelocitySP) * 125, 4)}px`,
+                      background: '#7c3aed',
+                      borderRadius: '4px 4px 0 0',
+                      transition: 'height 0.2s ease'
+                    }"
+                    :title="`${item.name} 完了: ${item.completedSP} SP (${item.completionRate}%)`"
+                  ></div>
+                </div>
+              </div>
+              <div style="font-size: 12px; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;">
+                {{ item.name }}
+              </div>
+              <span
+                :class="['badge', item.status === 'active' ? 'badge-green' : item.status === 'closed' ? 'badge-slate' : 'badge-blue']"
+                style="font-size: 10px;"
+              >
+                {{ item.status === 'active' ? 'アクティブ' : item.status === 'closed' ? '完了' : '計画中' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Breakdown Table -->
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px;">
+                <th style="padding: 8px 10px; text-align: left;">スプリント名</th>
+                <th style="padding: 8px 10px; text-align: center;">状態</th>
+                <th style="padding: 8px 10px; text-align: right;">完了タスク / 総タスク</th>
+                <th style="padding: 8px 10px; text-align: right;">計画 SP (Planned)</th>
+                <th style="padding: 8px 10px; text-align: right;">完了 SP (Completed)</th>
+                <th style="padding: 8px 10px; text-align: right;">SP消化率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="item in velocityStats.sprints"
+                :key="`tbl-${item.id}`"
+                style="border-bottom: 1px solid var(--border-color);"
+              >
+                <td style="padding: 8px 10px; font-weight: 600;">{{ item.name }}</td>
+                <td style="padding: 8px 10px; text-align: center;">
+                  <span
+                    :class="['badge', item.status === 'active' ? 'badge-green' : item.status === 'closed' ? 'badge-slate' : 'badge-blue']"
+                    style="font-size: 10px;"
+                  >
+                    {{ item.status === 'active' ? 'アクティブ' : item.status === 'closed' ? '完了' : '計画中' }}
+                  </span>
+                </td>
+                <td style="padding: 8px 10px; text-align: right;">{{ item.completedTaskCount }} / {{ item.taskCount }} 件</td>
+                <td style="padding: 8px 10px; text-align: right;">{{ item.plannedSP }} SP</td>
+                <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: #7c3aed;">{{ item.completedSP }} SP</td>
+                <td style="padding: 8px 10px; text-align: right; font-weight: 600;">{{ item.completionRate }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
+
+    <!-- Sprint Close Rollover Modal (未完了タスク一括引き継ぎ) -->
+    <div
+      v-if="rolloverModalOpen && closingSprint"
+      style="
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: rgba(0, 0, 0, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      "
+      v-backdrop-dismiss="() => { if (!isProcessingRollover) rolloverModalOpen = false }"
+    >
+      <div class="card" style="width: 100%; max-width: 520px; padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+        <h3 style="font-size: 16px; font-weight: 700;">
+          🏁 スプリント「{{ closingSprint.name }}」の完了と未完了タスク引き継ぎ
+        </h3>
+
+        <div style="padding: 10px 12px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); font-size: 13px;">
+          未完了タスクが <strong>{{ incompleteTasksForClosing.length }}</strong> 件（<strong>{{ incompleteSPForClosing }}</strong> SP）残っています。引き継ぎ方法を選択してください：
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+          <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-input);">
+            <input v-model="rolloverAction" type="radio" value="next_sprint" style="margin-top: 3px;" />
+            <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
+              <span style="font-weight: 600;">次の計画中スプリントへ一括移動</span>
+              <div v-if="rolloverAction === 'next_sprint'" style="display: flex; flex-direction: column; gap: 4px;">
+                <select v-if="plannedSprintsForRollover.length > 0" v-model="rolloverTargetSprintId" style="width: 100%; font-size: 12px;">
+                  <option v-for="psp in plannedSprintsForRollover" :key="psp.id" :value="psp.id">
+                    📅 {{ psp.name }} ({{ psp.start_date || '未定' }}〜{{ psp.end_date || '未定' }})
+                  </option>
+                </select>
+                <div v-else style="font-size: 12px; color: var(--text-muted);">
+                  ※ 計画中スプリントが存在しないため、新規スプリント「Sprint {{ sprints.length + 1 }}」を自動作成して移動します
+                </div>
+              </div>
+            </div>
+          </label>
+
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-input);">
+            <input v-model="rolloverAction" type="radio" value="backlog" />
+            <span style="font-weight: 600;">未割当バックログへ一括返却 (sprint_id = null)</span>
+          </label>
+
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-input);">
+            <input v-model="rolloverAction" type="radio" value="keep" />
+            <span style="font-weight: 600;">移動せずこのままスプリントを完了する</span>
+          </label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+          <button type="button" class="btn btn-secondary" :disabled="isProcessingRollover" @click="rolloverModalOpen = false">
+            キャンセル
+          </button>
+          <button type="button" class="btn btn-primary" :disabled="isProcessingRollover" @click="confirmRolloverAndCloseSprint">
+            {{ isProcessingRollover ? '⏳ 処理中...' : '✓ スプリントを完了する' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Create / Edit Sprint Modal -->
     <div
       v-if="modalOpen"
@@ -577,7 +837,7 @@
 
 <script setup lang="ts">
 import type { Sprint, SprintBurndown, Status, Task } from '~/types/polaris'
-import { formatHours } from '~/utils/format'
+import { calculateSprintMetrics, calculateVelocityStats, formatHours, formatLocalYMD, isTaskCompleted } from '~/utils/format'
 
 const props = defineProps<{
   projectId: string
@@ -594,7 +854,7 @@ const emit = defineEmits<{
 
 const { apiFetch, notifyToast } = useApi()
 
-const subTab = ref<'planning' | 'burndown'>('planning')
+const subTab = ref<'planning' | 'burndown' | 'velocity'>('planning')
 const selectedSprintId = ref<string>('')
 const burndownMetric = ref<'sp' | 'hours'>('sp')
 const isLoadingBurndown = ref(false)
@@ -605,6 +865,13 @@ const modalOpen = ref(false)
 const isEditing = ref(false)
 const editingSprintId = ref<string | null>(null)
 const isSavingSprint = ref(false)
+
+// Rollover Modal State
+const rolloverModalOpen = ref(false)
+const closingSprint = ref<Sprint | null>(null)
+const rolloverAction = ref<'next_sprint' | 'backlog' | 'keep'>('next_sprint')
+const rolloverTargetSprintId = ref<string>('')
+const isProcessingRollover = ref(false)
 
 const sprintForm = reactive({
   name: '',
@@ -623,13 +890,16 @@ const activeSprintTasks = computed(() => {
   return props.allTasks.filter(t => t.sprint_id === activeSprint.value!.id)
 })
 
-const activeSprintStoryPoints = computed(() => {
-  return activeSprintTasks.value.reduce((acc, t) => acc + (Number(t.story_points) || 0), 0)
+const activeSprintMetrics = computed(() => {
+  return calculateSprintMetrics(activeSprintTasks.value, props.statuses, activeSprint.value)
 })
 
-const activeSprintPlannedHours = computed(() => {
-  return activeSprintTasks.value.reduce((acc, t) => acc + (Number(t.planned_hours) || 0), 0)
-})
+const activeSprintTaskCount = computed(() => activeSprintMetrics.value.taskCount)
+const activeSprintStoryPoints = computed(() => activeSprintMetrics.value.totalSP)
+const activeSprintCompletedSP = computed(() => activeSprintMetrics.value.completedSP)
+const activeSprintCompletionRate = computed(() => activeSprintMetrics.value.completionRate)
+const activeSprintCompletedTaskCount = computed(() => activeSprintMetrics.value.completedTaskCount)
+const activeSprintPlannedHours = computed(() => activeSprintMetrics.value.plannedHours)
 
 const backlogTasks = computed(() => {
   return props.allTasks.filter(t => !t.sprint_id)
@@ -639,21 +909,100 @@ const backlogStoryPoints = computed(() => {
   return backlogTasks.value.reduce((acc, t) => acc + (Number(t.story_points) || 0), 0)
 })
 
+function isTaskDone(t: Task): boolean {
+  return isTaskCompleted(t, props.statuses)
+}
+
 function getTasksForSprint(sprintId: string): Task[] {
   return props.allTasks.filter(t => t.sprint_id === sprintId)
 }
 
+function getSprintMetrics(sprintId: string) {
+  const sp = props.sprints.find(s => s.id === sprintId) || null
+  return calculateSprintMetrics(getTasksForSprint(sprintId), props.statuses, sp)
+}
+
+function getSprintTaskCount(sprintId: string): number {
+  return getSprintMetrics(sprintId).taskCount
+}
+
 function getSprintTotalSP(sprintId: string): number {
-  return getTasksForSprint(sprintId).reduce((acc, t) => acc + (Number(t.story_points) || 0), 0)
+  return getSprintMetrics(sprintId).totalSP
+}
+
+function getSprintCompletedSP(sprintId: string): number {
+  return getSprintMetrics(sprintId).completedSP
+}
+
+function getSprintCompletionRate(sprintId: string): number {
+  return getSprintMetrics(sprintId).completionRate
+}
+
+function getSprintCompletedTaskCount(sprintId: string): number {
+  return getSprintMetrics(sprintId).completedTaskCount
 }
 
 function getSprintTotalPlannedHours(sprintId: string): number {
-  return getTasksForSprint(sprintId).reduce((acc, t) => acc + (Number(t.planned_hours) || 0), 0)
+  return getSprintMetrics(sprintId).plannedHours
 }
 
 function getStatusColor(statusId: string): string {
   return props.statuses.find(s => s.id === statusId)?.color || '#94a3b8'
 }
+
+const STANDARD_SP_OPTIONS = [1, 2, 3, 5, 8, 13, 21]
+function getSPOptions(currentVal?: number | null): number[] {
+  if (currentVal !== undefined && currentVal !== null && !STANDARD_SP_OPTIONS.includes(Number(currentVal))) {
+    return [...STANDARD_SP_OPTIONS, Number(currentVal)].sort((a, b) => a - b)
+  }
+  return STANDARD_SP_OPTIONS
+}
+
+async function updateTaskStoryPoints(task: Task, newVal: number | null) {
+  try {
+    await apiFetch(`/projects/${props.projectId}/tasks/${task.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ story_points: newVal })
+    })
+    notifyToast(`ストーリーポイントを ${newVal !== null ? `${newVal} SP` : '未設定'} に更新しました`, 'success')
+    emit('refresh')
+  } catch (e: any) {
+    notifyToast(e.message || 'SPの更新に失敗しました', 'error')
+  }
+}
+
+async function onQuickSPChange(task: Task, event: Event) {
+  const target = event.target as HTMLSelectElement
+  const raw = target.value
+  const newVal = raw === '' ? null : Number(raw)
+  await updateTaskStoryPoints(task, newVal)
+}
+
+const velocityStats = computed(() => {
+  return calculateVelocityStats(props.sprints, props.allTasks, props.statuses)
+})
+
+const maxVelocitySP = computed(() => {
+  let max = 10
+  for (const s of velocityStats.value.sprints) {
+    if (s.plannedSP > max) max = s.plannedSP
+    if (s.completedSP > max) max = s.completedSP
+  }
+  return Math.max(max, 1)
+})
+
+const plannedSprintsForRollover = computed(() => {
+  return props.sprints.filter(s => s.status === 'planned' && s.id !== closingSprint.value?.id)
+})
+
+const incompleteTasksForClosing = computed(() => {
+  if (!closingSprint.value) return []
+  return getTasksForSprint(closingSprint.value.id).filter(t => !isTaskCompleted(t, props.statuses))
+})
+
+const incompleteSPForClosing = computed(() => {
+  return Math.round(incompleteTasksForClosing.value.reduce((acc, t) => acc + (Number(t.story_points) || 0), 0) * 10) / 10
+})
 
 // Sprint Actions
 function openCreateModal() {
@@ -661,10 +1010,10 @@ function openCreateModal() {
   editingSprintId.value = null
   sprintForm.name = `Sprint ${props.sprints.length + 1}`
   sprintForm.goal = ''
-  sprintForm.start_date = new Date().toISOString().slice(0, 10)
+  sprintForm.start_date = formatLocalYMD(new Date())
   const d = new Date()
   d.setDate(d.getDate() + 14)
-  sprintForm.end_date = d.toISOString().slice(0, 10)
+  sprintForm.end_date = formatLocalYMD(d)
   sprintForm.status = 'planned'
   modalOpen.value = true
 }
@@ -721,6 +1070,21 @@ async function startSprint(sp: Sprint) {
 }
 
 async function closeSprint(sp: Sprint) {
+  const incomplete = getTasksForSprint(sp.id).filter(t => !isTaskCompleted(t, props.statuses))
+  if (incomplete.length > 0) {
+    closingSprint.value = sp
+    const plannedList = props.sprints.filter(s => s.status === 'planned' && s.id !== sp.id)
+    if (plannedList.length > 0) {
+      rolloverAction.value = 'next_sprint'
+      rolloverTargetSprintId.value = plannedList[0].id
+    } else {
+      rolloverAction.value = 'backlog'
+      rolloverTargetSprintId.value = ''
+    }
+    rolloverModalOpen.value = true
+    return
+  }
+
   if (!confirm(`スプリント「${sp.name}」を完了（クローズ）しますか？`)) return
   try {
     await apiFetch(`/sprints/${sp.id}`, {
@@ -731,6 +1095,31 @@ async function closeSprint(sp: Sprint) {
     emit('refresh')
   } catch (e: any) {
     notifyToast(e.message || 'スプリントの完了に失敗しました', 'error')
+  }
+}
+
+async function confirmRolloverAndCloseSprint() {
+  if (!closingSprint.value || isProcessingRollover.value) return
+  const s = closingSprint.value
+  isProcessingRollover.value = true
+  try {
+    await apiFetch(`/sprints/${s.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        status: 'closed',
+        rollover_action: rolloverAction.value,
+        rollover_target_sprint_id: rolloverAction.value === 'next_sprint' ? (rolloverTargetSprintId.value || null) : null
+      })
+    })
+
+    rolloverModalOpen.value = false
+    closingSprint.value = null
+    notifyToast(`スプリント「${s.name}」を完了しました`, 'success')
+    emit('refresh')
+  } catch (e: any) {
+    notifyToast(e.message || 'スプリント完了処理に失敗しました', 'error')
+  } finally {
+    isProcessingRollover.value = false
   }
 }
 

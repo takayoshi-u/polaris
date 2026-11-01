@@ -743,5 +743,33 @@ input[type="range"]:disabled::-moz-range-thumb {
   }
 }
 
+/* Sleek Custom Scrollbars (Kanban horizontal scroll assistant) */
+.kanban-scroll-wrapper::-webkit-scrollbar,
+.kanban-top-scroll-wrapper::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.kanban-scroll-wrapper::-webkit-scrollbar-track,
+.kanban-top-scroll-wrapper::-webkit-scrollbar-track {
+  background: var(--bg-elevated);
+  border-radius: 4px;
+}
+.kanban-scroll-wrapper::-webkit-scrollbar-thumb,
+.kanban-top-scroll-wrapper::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+.kanban-scroll-wrapper::-webkit-scrollbar-thumb:hover,
+.kanban-top-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+.kanban-scroll-wrapper,
+.kanban-top-scroll-wrapper {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) var(--bg-elevated);
+}
+
+
 
 

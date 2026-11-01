@@ -758,7 +758,7 @@
             <thead>
               <tr style="background-color: var(--bg-input); border-bottom: 1px solid var(--border-color); color: var(--text-muted);">
                 <th style="padding: 10px 16px; font-weight: 600; width: 280px;">対象ユーザー / グループ</th>
-                <th style="padding: 10px 16px; font-weight: 600; width: 90px; text-align: center;">種別</th>
+                <th style="padding: 10px 16px; font-weight: 600; width: 130px; min-width: 130px; white-space: nowrap; text-align: center;">種別</th>
                 <th style="padding: 10px 16px; font-weight: 600; text-align: center; width: 140px;">
                   <div>プロジェクト作成</div>
                   <div style="font-size: 11px; color: var(--text-muted); font-weight: 400;">create_project</div>
@@ -813,10 +813,10 @@
                 </td>
 
                 <!-- Type Badge -->
-                <td style="padding: 10px 16px; text-align: center;">
+                <td style="padding: 10px 16px; text-align: center; width: 130px; min-width: 130px; white-space: nowrap;">
                   <span
                     :class="['badge', sub.type === 'user' ? 'badge-slate' : 'badge-blue']"
-                    style="font-size: 11px;"
+                    style="font-size: 11px; white-space: nowrap;"
                   >
                     {{ sub.type === 'user' ? '👤 ユーザー' : '👥 グループ' }}
                   </span>

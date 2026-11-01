@@ -90,12 +90,12 @@
             <FolderKanban :size="16" /> プロジェクト一覧
           </NuxtLink>
           <NuxtLink
-            v-if="activeProject"
+            v-if="activeProject && route.params.id !== activeProject.id"
             :to="`/projects/${activeProject.id}`"
             class="btn btn-ghost"
             style="justify-content: flex-start; width: 100%; font-size: 14px;"
           >
-            <LayoutGrid :size="16" /> ワークスペースを開く
+            <LayoutGrid :size="16" /> ワークスペースに移動
           </NuxtLink>
           <NuxtLink
             v-if="hasSystemPerm('manage_system')"

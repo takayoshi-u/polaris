@@ -162,19 +162,19 @@ func (s *Store) DeleteTaskDependency(ctx context.Context, projectID, depID, acto
 // -------------------------------------------------------------
 
 type SprintCreateInput struct {
-	Name      string
-	Goal      *string
-	StartDate *string
-	EndDate   *string
-	Status    string
+	Name      string  `json:"name"`
+	Goal      *string `json:"goal"`
+	StartDate *string `json:"start_date"`
+	EndDate   *string `json:"end_date"`
+	Status    string  `json:"status"`
 }
 
 type SprintUpdateInput struct {
-	Name      *string
-	Goal      *string
-	StartDate *string
-	EndDate   *string
-	Status    *string
+	Name      *string `json:"name"`
+	Goal      *string `json:"goal"`
+	StartDate *string `json:"start_date"`
+	EndDate   *string `json:"end_date"`
+	Status    *string `json:"status"`
 }
 
 func (s *Store) ListSprints(ctx context.Context, projectID string) ([]domain.Sprint, error) {
@@ -615,20 +615,20 @@ func (s *Store) ListActivities(ctx context.Context, projectID string, entityType
 // -------------------------------------------------------------
 
 type WikiPageCreateInput struct {
-	Title     string
-	Slug      string
-	Content   string
-	ParentID  *string
-	SortOrder int
+	Title     string  `json:"title"`
+	Slug      string  `json:"slug"`
+	Content   string  `json:"content"`
+	ParentID  *string `json:"parent_id"`
+	SortOrder int     `json:"sort_order"`
 }
 
 type WikiPageUpdateInput struct {
-	Title     *string
-	Slug      *string
-	Content   *string
-	ParentID  *string
-	ClearParent bool
-	SortOrder *int
+	Title       *string `json:"title"`
+	Slug        *string `json:"slug"`
+	Content     *string `json:"content"`
+	ParentID    *string `json:"parent_id"`
+	ClearParent bool    `json:"clear_parent"`
+	SortOrder   *int    `json:"sort_order"`
 }
 
 func (s *Store) ListWikiPages(ctx context.Context, projectID string) ([]domain.WikiPage, error) {

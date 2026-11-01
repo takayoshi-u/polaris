@@ -1074,7 +1074,7 @@ function goToParentIssue() {
   if (isDirty.value && !confirm('未保存の変更があります。破棄して親課題へ移動しますか？')) {
     return
   }
-  router.replace({ query: { ...route.query, item: `issue:${props.task.issue_id}` } })
+  router.push({ query: { ...route.query, item: `issue:${props.task.issue_id}` } })
 }
 
 const ownerSelectRef = ref<HTMLSelectElement | null>(null)

@@ -218,6 +218,13 @@ func (s *Store) GetProject(ctx context.Context, projectID, userID string) (*doma
 	}
 	p.CurrentUserRole = role
 	p.IsMember = role != domain.RoleNone
+	if userID != "" && domain.RolePriority(p.CurrentUserRole) < domain.RolePriority(domain.RoleAdmin) {
+		hasSysAdmin, _ := s.HasUserSystemPermission(ctx, userID, domain.PermManageSystem)
+		if hasSysAdmin {
+			p.CurrentUserRole = domain.RoleAdmin
+			p.IsMember = true
+		}
+	}
 	return &p, nil
 }
 
@@ -362,8 +369,39 @@ func (s *Store) UpsertProjectMember(ctx context.Context, projectID, subjectType,
 	if role != domain.RoleAdmin && role != domain.RoleEditor && role != domain.RoleViewer {
 		return nil, fmt.Errorf("%w: role must be 'admin', 'editor', or 'viewer'", ErrBadRequest)
 	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// If demoting from admin to editor/viewer, check if there are other admins
+	if role != domain.RoleAdmin {
+		var currentRole string
+		err := tx.QueryRowContext(ctx, `
+			SELECT role FROM project_members
+			WHERE project_id = $1 AND subject_type = $2 AND subject_id = $3
+		`, projectID, subjectType, subjectID).Scan(&currentRole)
+		if err == nil && currentRole == string(domain.RoleAdmin) {
+			var otherAdminsCount int
+			err := tx.QueryRowContext(ctx, `
+				SELECT COUNT(*) FROM project_members
+				WHERE project_id = $1 AND role = 'admin' AND NOT (subject_type = $2 AND subject_id = $3)
+			`, projectID, subjectType, subjectID).Scan(&otherAdminsCount)
+			if err != nil {
+				return nil, err
+			}
+			if otherAdminsCount == 0 {
+				return nil, fmt.Errorf("%w: cannot demote the last project admin", ErrBadRequest)
+			}
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO project_members (id, project_id, subject_type, subject_id, role, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (project_id, subject_type, subject_id)
@@ -374,23 +412,60 @@ func (s *Store) UpsertProjectMember(ctx context.Context, projectID, subjectType,
 	}
 	var m domain.ProjectMember
 	var r string
-	err = s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT id, project_id, subject_type, subject_id, role, created_at
 		FROM project_members WHERE project_id = $1 AND subject_type = $2 AND subject_id = $3
 	`, projectID, subjectType, subjectID).Scan(&m.ID, &m.ProjectID, &m.SubjectType, &m.SubjectID, &r, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	m.Role = domain.ProjectRole(r)
-	return &m, err
+	return &m, nil
 }
 
 func (s *Store) RemoveProjectMember(ctx context.Context, projectID, memberEntryID string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM project_members WHERE id = $1 AND project_id = $2`, memberEntryID, projectID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var currentRole string
+	err = tx.QueryRowContext(ctx, `
+		SELECT role FROM project_members WHERE id = $1 AND project_id = $2
+	`, memberEntryID, projectID).Scan(&currentRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	if currentRole == string(domain.RoleAdmin) {
+		var otherAdminsCount int
+		err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM project_members
+			WHERE project_id = $1 AND role = 'admin' AND id != $2
+		`, projectID, memberEntryID).Scan(&otherAdminsCount)
+		if err != nil {
+			return err
+		}
+		if otherAdminsCount == 0 {
+			return fmt.Errorf("%w: cannot remove the last project admin", ErrBadRequest)
+		}
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM project_members WHERE id = $1 AND project_id = $2`, memberEntryID, projectID)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Statuses (1..10, unique display_order per project or system default)

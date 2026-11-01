@@ -479,8 +479,11 @@ func (s *Server) requireProjectRole(minRole domain.ProjectRole, next http.Handle
 			return
 		}
 		if domain.RolePriority(role) < domain.RolePriority(minRole) {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": "insufficient project role"})
-			return
+			hasSysAdmin, err := s.store.HasUserSystemPermission(r.Context(), u.ID, domain.PermManageSystem)
+			if err != nil || !hasSysAdmin {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "insufficient project role"})
+				return
+			}
 		}
 		next(w, r)
 	})

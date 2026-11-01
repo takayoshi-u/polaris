@@ -500,16 +500,20 @@
               <div style="font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px;">
                 <span>🔐</span>
                 <span>システム全体で2要素認証（MFA）を必須化</span>
-                <span v-if="sysForm.require_mfa" class="badge badge-amber" style="font-size: 10px;">必須化中</span>
               </div>
               <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">
                 有効にすると、すべてのユーザーにMFA設定が義務付けられ、未設定ユーザーはログイン後にMFA設定を完了するまで操作が制限されます。
               </p>
             </div>
-            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0; padding-top: 2px;">
-              <input v-model="sysForm.require_mfa" type="checkbox" style="width: 18px; height: 18px; cursor: pointer;" />
-              <span style="font-weight: 600; font-size: 13px;">{{ sysForm.require_mfa ? '有効' : '無効' }}</span>
-            </label>
+            <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding-top: 2px;">
+              <span :class="['badge', sysForm.require_mfa ? 'badge-amber' : 'badge-secondary']">
+                {{ sysForm.require_mfa ? '必須化中（有効）' : '未設定（無効）' }}
+              </span>
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input v-model="sysForm.require_mfa" type="checkbox" style="width: 18px; height: 18px; cursor: pointer;" />
+                <span style="font-weight: 600; font-size: 13px;">全社必須にする</span>
+              </label>
+            </div>
           </div>
 
           <div style="padding-top: 4px;">

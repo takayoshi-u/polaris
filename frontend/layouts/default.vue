@@ -113,9 +113,7 @@
       <div v-if="currentUser" style="border-top: 1px solid var(--border-color); padding-top: 12px; display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
           <div
-            style="display: flex; align-items: center; gap: 8px; cursor: pointer; overflow: hidden;"
-            title="アカウント設定を開く"
-            @click="openAccountModal"
+            style="display: flex; align-items: center; gap: 8px; cursor: default; overflow: hidden;"
           >
             <div style="width: 34px; height: 34px; border-radius: 999px; background: #4f46e5; color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
               {{ currentUser.display_name.slice(0, 2).toUpperCase() }}
@@ -137,6 +135,9 @@
             </button>
             <button class="btn btn-ghost btn-sm" title="アカウント設定" @click="openAccountModal">
               <Settings :size="14" />
+            </button>
+            <button class="btn btn-ghost btn-sm" title="ログアウト" style="color: var(--danger);" @click="logout">
+              <LogOut :size="14" />
             </button>
           </div>
         </div>
@@ -880,7 +881,7 @@
 </template>
 
 <script setup lang="ts">
-import { Bell, FolderKanban, Key, LayoutGrid, Menu, Plus, Settings, ShieldAlert, ShieldCheck, Smartphone, Trash2 } from 'lucide-vue-next'
+import { Bell, FolderKanban, Key, LayoutGrid, LogOut, Menu, Plus, Settings, ShieldAlert, ShieldCheck, Smartphone, Trash2 } from 'lucide-vue-next'
 import type { MFAStatus, NotificationItem, PersonalAccessToken, WebAuthnCredential } from '~/types/polaris'
 import { formatHours, formatJSTDateTime, hasAtMostTwoDecimals } from '~/utils/format'
 import { isWebAuthnSupported, performWebAuthnRegister } from '~/utils/webauthn'

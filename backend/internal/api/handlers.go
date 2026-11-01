@@ -850,7 +850,11 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	canDelete, _ := s.store.HasUserSystemPermission(r.Context(), u.ID, domain.PermDeleteProject)
-	if !p.IsMember && !canDelete {
+	isManageSystem, _ := s.store.HasUserSystemPermission(r.Context(), u.ID, domain.PermManageSystem)
+	if isManageSystem {
+		p.CurrentUserRole = domain.RoleAdmin
+		p.IsMember = true
+	} else if !p.IsMember && !canDelete {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "not a member of this project"})
 		return
 	}

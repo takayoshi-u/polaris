@@ -170,11 +170,13 @@ type SprintCreateInput struct {
 }
 
 type SprintUpdateInput struct {
-	Name      *string `json:"name"`
-	Goal      *string `json:"goal"`
-	StartDate *string `json:"start_date"`
-	EndDate   *string `json:"end_date"`
-	Status    *string `json:"status"`
+	Name                   *string `json:"name"`
+	Goal                   *string `json:"goal"`
+	StartDate              *string `json:"start_date"`
+	EndDate                *string `json:"end_date"`
+	Status                 *string `json:"status"`
+	RolloverAction         *string `json:"rollover_action"`
+	RolloverTargetSprintID *string `json:"rollover_target_sprint_id"`
 }
 
 func (s *Store) ListSprints(ctx context.Context, projectID string) ([]domain.Sprint, error) {
@@ -413,14 +415,129 @@ func (s *Store) UpdateSprint(ctx context.Context, sprintID, actorUserID string, 
 		}
 		status = st
 	}
+	if in.RolloverAction != nil {
+		ra := *in.RolloverAction
+		if ra != "" && ra != "next_sprint" && ra != "backlog" && ra != "keep" {
+			return nil, fmt.Errorf("%w: invalid rollover_action %s", ErrBadRequest, ra)
+		}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
 	now := time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `
+
+	if status == domain.SprintStatusClosed && in.RolloverAction != nil && *in.RolloverAction != "" {
+		doneIDs := s.getProjectDoneStatusIDs(ctx, sp.ProjectID)
+		taskRows, err := tx.QueryContext(ctx, `
+			SELECT id, status_id, progress FROM tasks WHERE sprint_id = $1 AND project_id = $2
+		`, sprintID, sp.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		var incompleteTaskIDs []string
+		for taskRows.Next() {
+			var tid, stID string
+			var prog int
+			if err := taskRows.Scan(&tid, &stID, &prog); err != nil {
+				taskRows.Close()
+				return nil, err
+			}
+			if !(prog >= 100 || doneIDs[stID]) {
+				incompleteTaskIDs = append(incompleteTaskIDs, tid)
+			}
+		}
+		if err := taskRows.Err(); err != nil {
+			taskRows.Close()
+			return nil, err
+		}
+		taskRows.Close()
+
+		if len(incompleteTaskIDs) > 0 {
+			switch *in.RolloverAction {
+			case "backlog":
+				for _, tid := range incompleteTaskIDs {
+					if _, err := tx.ExecContext(ctx, `
+						UPDATE tasks SET sprint_id = NULL, updated_at = $1 WHERE id = $2 AND project_id = $3
+					`, now, tid, sp.ProjectID); err != nil {
+						return nil, err
+					}
+				}
+			case "next_sprint":
+				var targetSprintID string
+				if in.RolloverTargetSprintID != nil && strings.TrimSpace(*in.RolloverTargetSprintID) != "" {
+					targetSprintID = strings.TrimSpace(*in.RolloverTargetSprintID)
+					if targetSprintID == sprintID {
+						return nil, fmt.Errorf("%w: rollover_target_sprint_id cannot be the sprint being closed", ErrBadRequest)
+					}
+					var targetProjID string
+					if err := tx.QueryRowContext(ctx, `SELECT project_id FROM sprints WHERE id = $1`, targetSprintID).Scan(&targetProjID); err != nil || targetProjID != sp.ProjectID {
+						return nil, fmt.Errorf("%w: rollover target sprint does not belong to project", ErrBadRequest)
+					}
+				} else {
+					nameRows, err := tx.QueryContext(ctx, `SELECT name FROM sprints WHERE project_id = $1`, sp.ProjectID)
+					if err != nil {
+						return nil, err
+					}
+					maxNum := 0
+					count := 0
+					for nameRows.Next() {
+						count++
+						var sName string
+						if err := nameRows.Scan(&sName); err == nil {
+							trimmed := strings.TrimSpace(sName)
+							if strings.HasPrefix(strings.ToLower(trimmed), "sprint ") {
+								numPart := strings.TrimSpace(trimmed[7:])
+								if n, errConv := strconv.Atoi(numPart); errConv == nil && n > maxNum {
+									maxNum = n
+								}
+							}
+						}
+					}
+					nameRows.Close()
+					nextNum := maxNum + 1
+					if count+1 > nextNum {
+						nextNum = count + 1
+					}
+					newName := fmt.Sprintf("Sprint %d", nextNum)
+					jst := time.FixedZone("JST", 9*3600)
+					nowJST := time.Now().In(jst)
+					newStart := nowJST.Format("2006-01-02")
+					newEnd := nowJST.AddDate(0, 0, 14).Format("2006-01-02")
+					targetSprintID = id.NewV7String()
+					if _, err := tx.ExecContext(ctx, `
+						INSERT INTO sprints (id, project_id, name, goal, start_date, end_date, status, created_at, updated_at)
+						VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $7)
+					`, targetSprintID, sp.ProjectID, newName, newStart, newEnd, domain.SprintStatusPlanned, now); err != nil {
+						return nil, err
+					}
+				}
+				for _, tid := range incompleteTaskIDs {
+					if _, err := tx.ExecContext(ctx, `
+						UPDATE tasks SET sprint_id = $1, updated_at = $2 WHERE id = $3 AND project_id = $4
+					`, targetSprintID, now, tid, sp.ProjectID); err != nil {
+						return nil, err
+					}
+				}
+			case "keep":
+				// Keep incomplete tasks in the closed sprint
+			}
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE sprints
 		SET name = $1, goal = $2, start_date = $3, end_date = $4, status = $5, updated_at = $6
 		WHERE id = $7
 	`, name, goal, nullDate(sDate), nullDate(eDate), status, now, sprintID)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 
@@ -481,15 +598,16 @@ func (s *Store) GetSprintBurndown(ctx context.Context, sprintID, actorUserID str
 
 	// Fetch tasks in sprint
 	doneStatusIDs := s.getProjectDoneStatusIDs(ctx, sp.ProjectID)
+	jst := time.FixedZone("JST", 9*3600)
 	type taskInfo struct {
 		sp       float64
 		pHours   float64
 		progress int
 		isDone   bool
-		endVal   *string
+		doneYMD  string
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT status_id, COALESCE(story_points, 0), COALESCE(planned_hours, 0), progress, actual_end_date
+		SELECT status_id, COALESCE(story_points, 0), COALESCE(planned_hours, 0), progress, actual_end_date, updated_at
 		FROM tasks WHERE sprint_id = $1
 	`, sprintID)
 	if err != nil {
@@ -503,12 +621,23 @@ func (s *Store) GetSprintBurndown(ctx context.Context, sprintID, actorUserID str
 		var ti taskInfo
 		var statusID string
 		var aEnd sql.NullTime
-		if err := rows.Scan(&statusID, &ti.sp, &ti.pHours, &ti.progress, &aEnd); err == nil {
+		var updatedAt time.Time
+		if err := rows.Scan(&statusID, &ti.sp, &ti.pHours, &ti.progress, &aEnd, &updatedAt); err == nil {
+			var endVal string
 			if aEnd.Valid {
-				v := aEnd.Time.Format("2006-01-02")
-				ti.endVal = &v
+				endVal = aEnd.Time.Format("2006-01-02")
 			}
 			ti.isDone = ti.progress >= 100 || doneStatusIDs[statusID]
+			if ti.isDone {
+				if endVal != "" {
+					ti.doneYMD = endVal
+				} else {
+					ti.doneYMD = updatedAt.In(jst).Format("2006-01-02")
+				}
+				if ti.doneYMD < startStr {
+					ti.doneYMD = startStr
+				}
+			}
 			totalSP += ti.sp
 			totalHours += ti.pHours
 			tasks = append(tasks, ti)
@@ -530,14 +659,9 @@ func (s *Store) GetSprintBurndown(ctx context.Context, sprintID, actorUserID str
 		// Calculate completed SP & hours on or before this day
 		var completedSP, completedHours float64
 		for _, t := range tasks {
-			if t.isDone {
-				if t.endVal != nil && *t.endVal <= dateStr {
-					completedSP += t.sp
-					completedHours += t.pHours
-				} else if t.endVal == nil && dateStr >= time.Now().Format("2006-01-02") {
-					completedSP += t.sp
-					completedHours += t.pHours
-				}
+			if t.isDone && t.doneYMD <= dateStr {
+				completedSP += t.sp
+				completedHours += t.pHours
 			}
 		}
 

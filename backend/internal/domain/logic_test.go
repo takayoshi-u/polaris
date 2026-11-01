@@ -311,8 +311,37 @@ func TestCalculateIssueRollup(t *testing.T) {
 		t.Fatalf("expected CompletedStoryPoints 8.0 (t1 via progress=100 + t2 via Done status), got %v", rollupSP.CompletedStoryPoints)
 	}
 
-	if !domain.IsDoneStatusName("完了") || !domain.IsDoneStatusName("Done") || !domain.IsDoneStatusName("Closed") || domain.IsDoneStatusName("In Progress") {
-		t.Fatalf("unexpected IsDoneStatusName result")
+	if !domain.IsDoneStatusName("完了") || !domain.IsDoneStatusName("クローズ") || !domain.IsDoneStatusName("Done") || !domain.IsDoneStatusName("Closed") || !domain.IsDoneStatusName("close") {
+		t.Fatalf("expected valid done status names to match")
+	}
+	if domain.IsDoneStatusName("In Progress") || domain.IsDoneStatusName("disclosed") || domain.IsDoneStatusName("enclosure") {
+		t.Fatalf("expected non-done status names (disclosed, enclosure) to return false")
+	}
+
+	// Test ResolveDoneStatusIDs edge cases
+	// 1. Single status without done name -> empty
+	singleStatuses := []domain.Status{{ID: "st-1", Name: "Open", DisplayOrder: 1}}
+	if len(domain.ResolveDoneStatusIDs(singleStatuses)) != 0 {
+		t.Fatalf("expected empty done set for single non-done status")
+	}
+	// 2. Explicit "完了" + trailing "Archive" -> only "完了" is Done
+	archiveStatuses := []domain.Status{
+		{ID: "st-todo", Name: "未着手", DisplayOrder: 1},
+		{ID: "st-done", Name: "完了", DisplayOrder: 2},
+		{ID: "st-arch", Name: "Archive", DisplayOrder: 3},
+	}
+	resolvedArch := domain.ResolveDoneStatusIDs(archiveStatuses)
+	if !resolvedArch["st-done"] || resolvedArch["st-arch"] || len(resolvedArch) != 1 {
+		t.Fatalf("expected only st-done to be resolved when explicit done name exists, got %+v", resolvedArch)
+	}
+	// 3. Fallback when no explicit done name exists and >= 2 statuses
+	customStatuses := []domain.Status{
+		{ID: "st-1", Name: "Step 1", DisplayOrder: 1},
+		{ID: "st-2", Name: "Step 2", DisplayOrder: 2},
+	}
+	resolvedCustom := domain.ResolveDoneStatusIDs(customStatuses)
+	if !resolvedCustom["st-2"] || len(resolvedCustom) != 1 {
+		t.Fatalf("expected highest display_order status st-2 as fallback, got %+v", resolvedCustom)
 	}
 }
 

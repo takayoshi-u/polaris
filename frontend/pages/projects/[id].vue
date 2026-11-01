@@ -1835,9 +1835,11 @@ import {
   calculateGanttDependencyPath,
   formatCost,
   formatHours,
+  formatLocalYMD,
   generateDateRangeYMD,
   getGanttScaleConfig,
-  hasAtMostTwoDecimals
+  hasAtMostTwoDecimals,
+  isTaskCompleted
 } from '~/utils/format'
 import {
   calculateColumnOffset,
@@ -1920,6 +1922,7 @@ const projectGroups = ref<Group[]>([])
 const globalGroups = ref<Group[]>([])
 const users = ref<User[]>([])
 const issues = ref<Issue[]>([])
+const allProjectIssues = ref<Issue[]>([])
 const sprints = ref<Sprint[]>([])
 const dependencies = ref<TaskDependency[]>([])
 const projectTypes = ref<ItemType[]>([])
@@ -1934,8 +1937,9 @@ const autoScheduleEnabled = ref(true)
 const showDependencyLines = ref(true)
 
 const allTasks = computed<Task[]>(() => {
+  const sourceIssues = allProjectIssues.value.length > 0 ? allProjectIssues.value : issues.value
   const list: Task[] = []
-  for (const iss of issues.value) {
+  for (const iss of sourceIssues) {
     for (const t of iss.tasks || []) {
       list.push(t)
     }
@@ -2017,9 +2021,13 @@ async function triggerAutoSchedule(changedTaskId: string, newEndDate: string) {
 }
 
 function openTaskDetailStandalone(t: Task) {
-  let parentIss = issues.value.find(i => (i.tasks || []).some(x => x.id === t.id))
+  let parentIss =
+    issues.value.find(i => (i.tasks || []).some(x => x.id === t.id)) ||
+    allProjectIssues.value.find(i => (i.tasks || []).some(x => x.id === t.id))
   if (!parentIss && t.issue_id) {
-    parentIss = issues.value.find(i => i.id === t.issue_id)
+    parentIss =
+      issues.value.find(i => i.id === t.issue_id) ||
+      allProjectIssues.value.find(i => i.id === t.issue_id)
   }
   openTaskDetail(t, parentIss || ({ id: t.issue_id, title: '親課題' } as any))
 }
@@ -2121,7 +2129,7 @@ const ganttDayWidth = computed(() => {
   }
   return baseDayWidth.value
 })
-const todayYMD = new Date().toISOString().slice(0, 10)
+const todayYMD = formatLocalYMD()
 const timelineStartYMD = ref(addDaysYMD(todayYMD, -5))
 const timelineDays = computed(() => {
   const count = getGanttScaleConfig(ganttScale.value).count
@@ -2154,11 +2162,7 @@ function scrollToToday() {
 
 function isTaskOverdue(t: Task): boolean {
   if (!t.planned_end_date) return false
-  if (t.progress >= 100) return false
-  const st = statuses.value.find(s => s.id === t.status_id)
-  if (st && (st.name.includes('完了') || st.name.toLowerCase().includes('done') || st.name.toLowerCase().includes('close'))) {
-    return false
-  }
+  if (isTaskCompleted(t, statuses.value)) return false
   return t.planned_end_date < todayYMD
 }
 
@@ -2565,9 +2569,29 @@ async function loadIssues() {
   if (filters.keyword.trim()) params.set('keyword', filters.keyword.trim())
   if (filters.label_ids.length > 0) params.set('label_ids', filters.label_ids.join(','))
 
+  const hasTaskFilters = Boolean(
+    filters.type_id ||
+    filters.status_id ||
+    filters.assignee_id ||
+    filters.sprint_id ||
+    filters.keyword.trim() ||
+    filters.label_ids.length > 0
+  )
+  const isUnfilteredAll = !hasTaskFilters && filters.issue_state === 'all'
+
   try {
-    const list = await apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`)
-    issues.value = list || []
+    if (isUnfilteredAll) {
+      const list = await apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`)
+      issues.value = list || []
+      allProjectIssues.value = issues.value
+    } else {
+      const [list, allList] = await Promise.all([
+        apiFetch<Issue[]>(`/projects/${projectId.value}/issues?${params.toString()}`),
+        apiFetch<Issue[]>(`/projects/${projectId.value}/issues?state=all`).catch(() => null)
+      ])
+      issues.value = list || []
+      allProjectIssues.value = allList !== null ? allList : issues.value
+    }
   } catch (e: any) {
     notifyToast(e.message, 'error')
   }

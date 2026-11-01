@@ -76,7 +76,7 @@
               ⚡ 消化 {{ activeSprintCompletedSP }} / {{ activeSprintStoryPoints }} SP ({{ activeSprintCompletionRate }}%)
             </span>
             <span class="badge badge-blue">
-              完了 {{ activeSprintCompletedTaskCount }} / {{ activeSprintTasks.length }} タスク
+              完了 {{ activeSprintCompletedTaskCount }} / {{ activeSprintTaskCount }} タスク
             </span>
             <span class="badge badge-slate">{{ formatHours(activeSprintPlannedHours) }}h</span>
           </div>
@@ -207,7 +207,7 @@
             <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px; padding: 8px 10px; background: var(--bg-input); border-radius: 6px;">
               <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
                 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
-                  <span>タスク: <strong>{{ getSprintCompletedTaskCount(sp.id) }} / {{ getTasksForSprint(sp.id).length }}</strong> 件完了</span>
+                  <span>タスク: <strong>{{ getSprintCompletedTaskCount(sp.id) }} / {{ getSprintTaskCount(sp.id) }}</strong> 件完了</span>
                   <span>・</span>
                   <span>SP(完/計): <strong style="color: #7c3aed;">{{ getSprintCompletedSP(sp.id) }} / {{ getSprintTotalSP(sp.id) }} SP ({{ getSprintCompletionRate(sp.id) }}%)</strong></span>
                   <span>・</span>
@@ -765,7 +765,7 @@
           <button type="button" class="btn btn-secondary" :disabled="isProcessingRollover" @click="rolloverModalOpen = false">
             キャンセル
           </button>
-          <button type="button" class="btn btn-primary" :disabled="isProcessingRollover" @click="confirmCloseSprintWithRollover">
+          <button type="button" class="btn btn-primary" :disabled="isProcessingRollover" @click="confirmRolloverAndCloseSprint">
             {{ isProcessingRollover ? '⏳ 処理中...' : '✓ スプリントを完了する' }}
           </button>
         </div>
@@ -837,7 +837,7 @@
 
 <script setup lang="ts">
 import type { Sprint, SprintBurndown, Status, Task } from '~/types/polaris'
-import { calculateSprintMetrics, calculateVelocityStats, formatHours, isTaskCompleted } from '~/utils/format'
+import { calculateSprintMetrics, calculateVelocityStats, formatHours, formatLocalYMD, isTaskCompleted } from '~/utils/format'
 
 const props = defineProps<{
   projectId: string
@@ -891,9 +891,10 @@ const activeSprintTasks = computed(() => {
 })
 
 const activeSprintMetrics = computed(() => {
-  return calculateSprintMetrics(activeSprintTasks.value, props.statuses)
+  return calculateSprintMetrics(activeSprintTasks.value, props.statuses, activeSprint.value)
 })
 
+const activeSprintTaskCount = computed(() => activeSprintMetrics.value.taskCount)
 const activeSprintStoryPoints = computed(() => activeSprintMetrics.value.totalSP)
 const activeSprintCompletedSP = computed(() => activeSprintMetrics.value.completedSP)
 const activeSprintCompletionRate = computed(() => activeSprintMetrics.value.completionRate)
@@ -917,7 +918,12 @@ function getTasksForSprint(sprintId: string): Task[] {
 }
 
 function getSprintMetrics(sprintId: string) {
-  return calculateSprintMetrics(getTasksForSprint(sprintId), props.statuses)
+  const sp = props.sprints.find(s => s.id === sprintId) || null
+  return calculateSprintMetrics(getTasksForSprint(sprintId), props.statuses, sp)
+}
+
+function getSprintTaskCount(sprintId: string): number {
+  return getSprintMetrics(sprintId).taskCount
 }
 
 function getSprintTotalSP(sprintId: string): number {
@@ -1004,10 +1010,10 @@ function openCreateModal() {
   editingSprintId.value = null
   sprintForm.name = `Sprint ${props.sprints.length + 1}`
   sprintForm.goal = ''
-  sprintForm.start_date = new Date().toISOString().slice(0, 10)
+  sprintForm.start_date = formatLocalYMD(new Date())
   const d = new Date()
   d.setDate(d.getDate() + 14)
-  sprintForm.end_date = d.toISOString().slice(0, 10)
+  sprintForm.end_date = formatLocalYMD(d)
   sprintForm.status = 'planned'
   modalOpen.value = true
 }
@@ -1092,56 +1098,41 @@ async function closeSprint(sp: Sprint) {
   }
 }
 
-async function confirmCloseSprintWithRollover() {
+async function confirmRolloverAndCloseSprint() {
   if (!closingSprint.value || isProcessingRollover.value) return
-  const sp = closingSprint.value
-  const incomplete = incompleteTasksForClosing.value
+  const s = closingSprint.value
   isProcessingRollover.value = true
   try {
-    if (incomplete.length > 0 && rolloverAction.value !== 'keep') {
-      let targetSprintId: string | null = null
-      if (rolloverAction.value === 'next_sprint') {
-        if (rolloverTargetSprintId.value) {
-          targetSprintId = rolloverTargetSprintId.value
-        } else {
-          // Auto-create next sprint
-          const today = new Date()
-          const endDt = new Date()
-          endDt.setDate(endDt.getDate() + 14)
-          const created = await apiFetch<Sprint>(`/projects/${props.projectId}/sprints`, {
-            method: 'POST',
-            body: JSON.stringify({
-              name: `Sprint ${props.sprints.length + 1}`,
-              goal: '',
-              start_date: today.toISOString().slice(0, 10),
-              end_date: endDt.toISOString().slice(0, 10),
-              status: 'planned'
-            })
-          })
-          targetSprintId = created.id
-        }
-      } else if (rolloverAction.value === 'backlog') {
-        targetSprintId = null
-      }
-
-      await Promise.all(
-        incomplete.map(t =>
-          apiFetch(`/projects/${props.projectId}/tasks/${t.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ sprint_id: targetSprintId })
-          })
-        )
-      )
+    if (rolloverAction.value === 'next_sprint' && !rolloverTargetSprintId.value) {
+      // Auto-create next sprint if none exists
+      const today = new Date()
+      const endDt = new Date()
+      endDt.setDate(endDt.getDate() + 14)
+      const created = await apiFetch<Sprint>(`/projects/${props.projectId}/sprints`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: `Sprint ${props.sprints.length + 1}`,
+          goal: '',
+          start_date: formatLocalYMD(today),
+          end_date: formatLocalYMD(endDt),
+          status: 'planned'
+        })
+      })
+      rolloverTargetSprintId.value = created.id
     }
 
-    await apiFetch(`/sprints/${sp.id}`, {
+    await apiFetch(`/projects/${props.projectId}/sprints/${s.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ status: 'closed' })
+      body: JSON.stringify({
+        status: 'closed',
+        rollover_action: rolloverAction.value,
+        rollover_target_sprint_id: rolloverAction.value === 'next_sprint' ? (rolloverTargetSprintId.value || null) : null
+      })
     })
 
     rolloverModalOpen.value = false
     closingSprint.value = null
-    notifyToast(`スプリント「${sp.name}」を完了しました`, 'success')
+    notifyToast(`スプリント「${s.name}」を完了しました`, 'success')
     emit('refresh')
   } catch (e: any) {
     notifyToast(e.message || 'スプリント完了処理に失敗しました', 'error')

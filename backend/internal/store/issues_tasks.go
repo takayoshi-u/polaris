@@ -105,28 +105,11 @@ type IssueTaskFilter struct {
 }
 
 func (s *Store) getProjectDoneStatusIDs(ctx context.Context, projectID string) map[string]bool {
-	doneIDs := make(map[string]bool)
 	statuses, err := s.ListStatuses(ctx, &projectID)
-	if err != nil || len(statuses) == 0 {
-		return doneIDs
+	if err != nil {
+		return make(map[string]bool)
 	}
-	maxOrder := -1
-	for _, st := range statuses {
-		if domain.IsDoneStatusName(st.Name) {
-			doneIDs[st.ID] = true
-		}
-		if st.DisplayOrder > maxOrder {
-			maxOrder = st.DisplayOrder
-		}
-	}
-	if len(statuses) >= 2 && maxOrder > 0 {
-		for _, st := range statuses {
-			if st.DisplayOrder == maxOrder {
-				doneIDs[st.ID] = true
-			}
-		}
-	}
-	return doneIDs
+	return domain.ResolveDoneStatusIDs(statuses)
 }
 
 func (s *Store) getLowestOrderStatusID(ctx context.Context, projectID string) (string, error) {
@@ -144,6 +127,12 @@ func (s *Store) CreateIssue(ctx context.Context, projectID, creatorUserID string
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		return nil, fmt.Errorf("%w: issue title is required", ErrBadRequest)
+	}
+	if len(in.Premortem) > 100000 {
+		return nil, fmt.Errorf("%w: premortem exceeds maximum length of 100000 bytes", ErrBadRequest)
+	}
+	if len(in.Postmortem) > 100000 {
+		return nil, fmt.Errorf("%w: postmortem exceeds maximum length of 100000 bytes", ErrBadRequest)
 	}
 
 	proj, err := s.GetProject(ctx, projectID, creatorUserID)
@@ -179,6 +168,14 @@ func (s *Store) CreateIssue(ctx context.Context, projectID, creatorUserID string
 	if p, ok := perms[domain.StdFieldDescription]; ok && !p.CanEdit {
 		desc = ""
 	}
+	premortem := in.Premortem
+	if p, ok := perms[domain.StdFieldPremortem]; ok && !p.CanEdit {
+		premortem = ""
+	}
+	postmortem := in.Postmortem
+	if p, ok := perms[domain.StdFieldPostmortem]; ok && !p.CanEdit {
+		postmortem = ""
+	}
 
 	var maxOrder int
 	_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), 0) FROM issues WHERE project_id = $1`, projectID).Scan(&maxOrder)
@@ -198,7 +195,7 @@ func (s *Store) CreateIssue(ctx context.Context, projectID, creatorUserID string
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO issues (id, project_id, template_id, type_id, owner_user_id, state, title, description, premortem, postmortem, display_order, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $10, $11, $11)
-	`, issueID, projectID, tplID, typeID, creatorUserID, title, desc, in.Premortem, in.Postmortem, maxOrder+1, now); err != nil {
+	`, issueID, projectID, tplID, typeID, creatorUserID, title, desc, premortem, postmortem, maxOrder+1, now); err != nil {
 		return nil, err
 	}
 
@@ -521,6 +518,22 @@ func (s *Store) UpdateIssue(ctx context.Context, projectID, issueID, actorUserID
 			return nil, fmt.Errorf("%w: no edit permission for description", ErrForbidden)
 		}
 	}
+	if in.Premortem != nil {
+		if p, ok := perms[domain.StdFieldPremortem]; ok && !p.CanEdit {
+			return nil, fmt.Errorf("%w: no edit permission for premortem", ErrForbidden)
+		}
+		if len(*in.Premortem) > 100000 {
+			return nil, fmt.Errorf("%w: premortem exceeds maximum length of 100000 bytes", ErrBadRequest)
+		}
+	}
+	if in.Postmortem != nil {
+		if p, ok := perms[domain.StdFieldPostmortem]; ok && !p.CanEdit {
+			return nil, fmt.Errorf("%w: no edit permission for postmortem", ErrForbidden)
+		}
+		if len(*in.Postmortem) > 100000 {
+			return nil, fmt.Errorf("%w: postmortem exceeds maximum length of 100000 bytes", ErrBadRequest)
+		}
+	}
 	if in.LabelIDs != nil {
 		if p, ok := perms[domain.StdFieldLabels]; ok && !p.CanEdit {
 			return nil, fmt.Errorf("%w: no edit permission for labels", ErrForbidden)
@@ -546,16 +559,16 @@ func (s *Store) UpdateIssue(ctx context.Context, projectID, issueID, actorUserID
 			return nil, fmt.Errorf("%w: title cannot be empty", ErrBadRequest)
 		}
 	}
-	var currentDesc string
-	_ = tx.QueryRowContext(ctx, `SELECT description FROM issues WHERE id = $1`, issueID).Scan(&currentDesc)
+	var currentDesc, currentPremortem, currentPostmortem string
+	_ = tx.QueryRowContext(ctx, `SELECT description, premortem, postmortem FROM issues WHERE id = $1`, issueID).Scan(&currentDesc, &currentPremortem, &currentPostmortem)
 	if in.Description != nil {
 		currentDesc = *in.Description
 	}
-	premortem := existing.Premortem
+	premortem := currentPremortem
 	if in.Premortem != nil {
 		premortem = *in.Premortem
 	}
-	postmortem := existing.Postmortem
+	postmortem := currentPostmortem
 	if in.Postmortem != nil {
 		postmortem = *in.Postmortem
 	}
@@ -1481,6 +1494,14 @@ func (s *Store) computeTemplatePermissions(tpl *domain.Template, targetType, use
 			CanEdit: defaultCanEdit,
 		}
 	}
+	if targetType == domain.TargetIssue {
+		for _, optKey := range []string{domain.StdFieldPremortem, domain.StdFieldPostmortem} {
+			perms[optKey] = domain.FieldPermissionState{
+				CanView: true,
+				CanEdit: defaultCanEdit,
+			}
+		}
+	}
 	if targetType == domain.TargetTask {
 		for _, optKey := range []string{domain.StdFieldPlannedCost, domain.StdFieldActualCost} {
 			perms[optKey] = domain.FieldPermissionState{
@@ -1508,6 +1529,12 @@ func (s *Store) applyIssueFieldPermissions(iss *domain.Issue, tpl *domain.Templa
 	// Non-skeleton standard fields: mask/omit if CanView == false
 	if p, ok := perms[domain.StdFieldDescription]; ok && !p.CanView {
 		iss.Description = nil
+	}
+	if p, ok := perms[domain.StdFieldPremortem]; ok && !p.CanView {
+		iss.Premortem = ""
+	}
+	if p, ok := perms[domain.StdFieldPostmortem]; ok && !p.CanView {
+		iss.Postmortem = ""
 	}
 	if p, ok := perms[domain.StdFieldLabels]; ok && !p.CanView {
 		iss.LabelIDs = []string{}

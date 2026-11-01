@@ -2532,6 +2532,15 @@ paths:
                 status:
                   type: string
                   enum: [planned, active, closed]
+                rollover_action:
+                  type: string
+                  enum: [next_sprint, backlog, keep]
+                  description: スプリント完了(status=closed)時に未完了タスクを一括処理するオプション（単一トランザクション実行）
+                rollover_target_sprint_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: rollover_action=next_sprint 時の移動先スプリントID（未指定時は次期スプリントを自動作成）
                   default: planned
       responses:
         '201':
@@ -2573,6 +2582,15 @@ paths:
                 status:
                   type: string
                   enum: [planned, active, closed]
+                rollover_action:
+                  type: string
+                  enum: [next_sprint, backlog, keep]
+                  description: スプリント完了(status=closed)時に未完了タスクを一括処理するオプション（単一トランザクション実行）
+                rollover_target_sprint_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: rollover_action=next_sprint 時の移動先スプリントID（未指定時は次期スプリントを自動作成）
       responses:
         '200':
           description: スプリント更新完了

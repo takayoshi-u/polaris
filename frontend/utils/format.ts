@@ -1,5 +1,22 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import {
+  buildGanttHeaderGroups as _buildGanttHeaderGroups,
+  calculateSprintMetrics as _calculateSprintMetrics,
+  calculateVelocityStats as _calculateVelocityStats,
+  formatLocalYMD as _formatLocalYMD,
+  getGanttScaleConfig as _getGanttScaleConfig,
+  isDoneStatusName as _isDoneStatusName,
+  isTaskCompleted as _isTaskCompleted,
+  resolveDoneStatusIds as _resolveDoneStatusIds
+} from './agile_gantt.mjs'
+
+/**
+ * Formats a Date object (or date-like value) to local YYYY-MM-DD using local calendar getters.
+ */
+export function formatLocalYMD(date: Date | string | number = new Date()): string {
+  return _formatLocalYMD(date)
+}
 
 /**
  * Formats an ISO timestamp string to JST (Asia/Tokyo) YYYY-MM-DD HH:mm.
@@ -704,9 +721,16 @@ export function parseDirectUserText(
  * Checks whether a status name represents a completed/done state.
  */
 export function isDoneStatusName(name?: string | null): boolean {
-  if (!name) return false
-  const lower = String(name).trim().toLowerCase()
-  return lower.includes('完了') || lower.includes('done') || lower.includes('close')
+  return _isDoneStatusName(name)
+}
+
+/**
+ * Resolves the Set of status IDs considered "Done/Completed" for a project.
+ */
+export function resolveDoneStatusIds(
+  statuses: { id: string; name: string; display_order: number }[] = []
+): Set<string> {
+  return _resolveDoneStatusIds(statuses)
 }
 
 /**
@@ -716,16 +740,7 @@ export function isTaskCompleted(
   task: { progress?: number | null; status_id?: string | null },
   statuses: { id: string; name: string; display_order: number }[] = []
 ): boolean {
-  if ((task.progress ?? 0) >= 100) return true
-  if (!task.status_id || !statuses || statuses.length === 0) return false
-  const st = statuses.find(s => s.id === task.status_id)
-  if (!st) return false
-  if (isDoneStatusName(st.name)) return true
-  if (statuses.length >= 2) {
-    const maxOrder = Math.max(...statuses.map(s => s.display_order))
-    if (st.display_order === maxOrder) return true
-  }
-  return false
+  return _isTaskCompleted(task, statuses)
 }
 
 export interface SprintMetricsResult {
@@ -749,46 +764,17 @@ export function calculateSprintMetrics(
     progress?: number | null
     status_id?: string | null
   }[],
-  statuses: { id: string; name: string; display_order: number }[] = []
+  statuses: { id: string; name: string; display_order: number }[] = [],
+  sprintObj: {
+    task_count?: number | null
+    completed_task_count?: number | null
+    total_story_points?: number | null
+    completed_story_points?: number | null
+    total_planned_hours?: number | null
+    total_actual_hours?: number | null
+  } | null = null
 ): SprintMetricsResult {
-  let taskCount = 0
-  let completedTaskCount = 0
-  let totalSP = 0
-  let completedSP = 0
-  let plannedHours = 0
-  let actualHours = 0
-
-  for (const t of tasks || []) {
-    taskCount++
-    const sp = Number(t.story_points) || 0
-    const pHours = Number(t.planned_hours) || 0
-    const aHours = Number(t.actual_hours) || 0
-    totalSP += sp
-    plannedHours += pHours
-    actualHours += aHours
-
-    if (isTaskCompleted(t, statuses)) {
-      completedTaskCount++
-      completedSP += sp
-    }
-  }
-
-  totalSP = Math.round(totalSP * 10) / 10
-  completedSP = Math.round(completedSP * 10) / 10
-  plannedHours = Math.round(plannedHours * 100) / 100
-  actualHours = Math.round(actualHours * 100) / 100
-
-  const completionRate = totalSP > 0 ? Math.round((completedSP / totalSP) * 1000) / 10 : 0
-
-  return {
-    taskCount,
-    completedTaskCount,
-    totalSP,
-    completedSP,
-    completionRate,
-    plannedHours,
-    actualHours
-  }
+  return _calculateSprintMetrics(tasks, statuses, sprintObj)
 }
 
 export interface SprintVelocityItem {
@@ -814,7 +800,17 @@ export interface VelocityStatsResult {
  * Calculates per-sprint velocity breakdown and average velocity across sprints.
  */
 export function calculateVelocityStats(
-  sprints: { id: string; name: string; status: string }[],
+  sprints: {
+    id: string
+    name: string
+    status: string
+    task_count?: number | null
+    completed_task_count?: number | null
+    total_story_points?: number | null
+    completed_story_points?: number | null
+    total_planned_hours?: number | null
+    total_actual_hours?: number | null
+  }[],
   allTasks: {
     sprint_id?: string | null
     story_points?: number | null
@@ -825,51 +821,7 @@ export function calculateVelocityStats(
   }[],
   statuses: { id: string; name: string; display_order: number }[] = []
 ): VelocityStatsResult {
-  const items: SprintVelocityItem[] = (sprints || []).map((sp) => {
-    const spTasks = (allTasks || []).filter(t => t.sprint_id === sp.id)
-    const m = calculateSprintMetrics(spTasks, statuses)
-    return {
-      id: sp.id,
-      name: sp.name,
-      status: sp.status,
-      taskCount: m.taskCount,
-      completedTaskCount: m.completedTaskCount,
-      plannedSP: m.totalSP,
-      completedSP: m.completedSP,
-      completionRate: m.completionRate
-    }
-  })
-
-  const closedItems = items.filter(i => i.status === 'closed')
-  const activeAndClosedItems = items.filter(i => i.status === 'closed' || i.status === 'active')
-  const basisItems = closedItems.length > 0 ? closedItems : activeAndClosedItems
-
-  let averageVelocity = 0
-  if (basisItems.length > 0) {
-    const sumCompleted = basisItems.reduce((acc, i) => acc + i.completedSP, 0)
-    averageVelocity = Math.round((sumCompleted / basisItems.length) * 10) / 10
-  }
-
-  const recentTarget = closedItems.length > 0
-    ? closedItems[closedItems.length - 1]
-    : activeAndClosedItems.length > 0
-      ? activeAndClosedItems[activeAndClosedItems.length - 1]
-      : items[items.length - 1]
-  const recentVelocity = recentTarget ? recentTarget.completedSP : 0
-
-  const totalPlannedAll = items.reduce((acc, i) => acc + i.plannedSP, 0)
-  const totalCompletedAll = items.reduce((acc, i) => acc + i.completedSP, 0)
-  const overallCompletionRate = totalPlannedAll > 0
-    ? Math.round((totalCompletedAll / totalPlannedAll) * 1000) / 10
-    : 0
-
-  return {
-    sprints: items,
-    sprintStats: items,
-    averageVelocity,
-    recentVelocity,
-    overallCompletionRate
-  }
+  return _calculateVelocityStats(sprints, allTasks, statuses)
 }
 
 export interface GanttHeaderGroup {
@@ -895,9 +847,7 @@ export interface GanttScaleHeaderResult {
  * Returns the default baseDayWidth and day count for each Gantt scale.
  */
 export function getGanttScaleConfig(scale: 'day' | 'week' | 'month'): { baseDayWidth: number; count: number } {
-  if (scale === 'day') return { baseDayWidth: 48, count: 30 }
-  if (scale === 'week') return { baseDayWidth: 16, count: 91 }
-  return { baseDayWidth: 6, count: 180 }
+  return _getGanttScaleConfig(scale)
 }
 
 /**
@@ -908,97 +858,7 @@ export function buildGanttHeaderGroups(
   scale: 'day' | 'week' | 'month',
   dayWidth?: number
 ): GanttScaleHeaderResult {
-  const cfg = getGanttScaleConfig(scale)
-  const effectiveDayWidth = dayWidth !== undefined && dayWidth > 0 ? dayWidth : cfg.baseDayWidth
-  const upperGroups: GanttHeaderGroup[] = []
-  const lowerGroups: GanttHeaderGroup[] = []
-
-  const weekdays = ['日', '月', '火', '水', '木', '金', '土']
-
-  for (const ymd of timelineDays || []) {
-    const parts = ymd.split('-').map(Number)
-    const year = parts[0]
-    const month = parts[1]
-    const day = parts[2]
-    const dt = new Date(Date.UTC(year, month - 1, day))
-    const dow = dt.getUTCDay()
-
-    // Upper tier grouping
-    const upperLabel = scale === 'month' ? `${year}年` : `${year}年 ${month}月`
-    const lastUpper = upperGroups[upperGroups.length - 1]
-    if (lastUpper && lastUpper.label === upperLabel) {
-      lastUpper.count++
-      lastUpper.endYMD = ymd
-      lastUpper.widthPx = lastUpper.count * effectiveDayWidth
-    } else {
-      upperGroups.push({
-        key: `upper-${ymd}`,
-        label: upperLabel,
-        startYMD: ymd,
-        endYMD: ymd,
-        count: 1,
-        widthPx: effectiveDayWidth
-      })
-    }
-
-    // Lower tier grouping
-    if (scale === 'day') {
-      lowerGroups.push({
-        key: `day-${ymd}`,
-        label: `${String(day).padStart(2, '0')} (${weekdays[dow]})`,
-        startYMD: ymd,
-        endYMD: ymd,
-        count: 1,
-        widthPx: effectiveDayWidth,
-        isWeekend: dow === 0 || dow === 6
-      })
-    } else if (scale === 'week') {
-      const lastLower = lowerGroups[lowerGroups.length - 1]
-      // Start a new weekly bucket on Monday (dow === 1) or if first element or bucket reached 7 days
-      if (!lastLower || dow === 1 || lastLower.count >= 7) {
-        lowerGroups.push({
-          key: `week-${ymd}`,
-          label: `${month}/${day}〜`,
-          startYMD: ymd,
-          endYMD: ymd,
-          count: 1,
-          widthPx: effectiveDayWidth
-        })
-      } else {
-        lastLower.count++
-        lastLower.endYMD = ymd
-        lastLower.widthPx = lastLower.count * effectiveDayWidth
-      }
-    } else {
-      // scale === 'month': monthly buckets
-      const monthKey = `${year}-${String(month).padStart(2, '0')}`
-      const monthLabel = `${month}月`
-      const lastLower = lowerGroups[lowerGroups.length - 1]
-      if (lastLower && lastLower.key === `month-${monthKey}`) {
-        lastLower.count++
-        lastLower.endYMD = ymd
-        lastLower.widthPx = lastLower.count * effectiveDayWidth
-      } else {
-        lowerGroups.push({
-          key: `month-${monthKey}`,
-          label: monthLabel,
-          startYMD: ymd,
-          endYMD: ymd,
-          count: 1,
-          widthPx: effectiveDayWidth
-        })
-      }
-    }
-  }
-
-  return {
-    scale,
-    baseDayWidth: cfg.baseDayWidth,
-    defaultDayCount: cfg.count,
-    upperGroups,
-    lowerGroups,
-    totalWidthPx: (timelineDays?.length || 0) * effectiveDayWidth
-  }
+  return _buildGanttHeaderGroups(timelineDays, scale, dayWidth)
 }
 
 

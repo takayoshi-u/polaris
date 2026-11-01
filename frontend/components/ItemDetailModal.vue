@@ -651,7 +651,7 @@
               v-if="premortemTab === 'write'"
               v-model="form.premortem"
               rows="7"
-              :disabled="!canEditAny"
+              :disabled="!isKeyEditable('premortem')"
               style="width: 100%; font-size: 12px;"
               placeholder="プロジェクトや課題が失敗するとしたら何が原因か？事前のリスクシナリオと予防策を記述..."
             ></textarea>
@@ -715,7 +715,7 @@
               v-if="postmortemTab === 'write'"
               v-model="form.postmortem"
               rows="7"
-              :disabled="!canEditAny"
+              :disabled="!isKeyEditable('postmortem')"
               style="width: 100%; font-size: 12px;"
               placeholder="予実ギャップの分析やKPT (Keep / Problem / Try)、次への学びを記述..."
             ></textarea>
@@ -1637,8 +1637,8 @@ async function saveItem() {
       const payload: Record<string, any> = {}
       if (isKeyEditable('title')) payload.title = form.title
       if (isKeyEditable('description')) payload.description = form.description
-      payload.premortem = form.premortem
-      payload.postmortem = form.postmortem
+      if (isKeyEditable('premortem')) payload.premortem = form.premortem
+      if (isKeyEditable('postmortem')) payload.postmortem = form.postmortem
       if (isKeyEditable('state')) payload.state = form.state
       if (form.template_id) payload.template_id = form.template_id
       payload.type_id = form.type_id || null

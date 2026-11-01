@@ -87,6 +87,8 @@ const (
 	StdFieldActualCost   = "actual_cost"
 	StdFieldProgress     = "progress"
 	StdFieldType         = "type"
+	StdFieldPremortem    = "premortem"
+	StdFieldPostmortem   = "postmortem"
 )
 
 // Placeholder for unviewable fields (Method A)

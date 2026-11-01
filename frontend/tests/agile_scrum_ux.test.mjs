@@ -3,6 +3,16 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  isDoneStatusName,
+  resolveDoneStatusIds,
+  isTaskCompleted,
+  calculateSprintMetrics,
+  calculateVelocityStats,
+  getGanttScaleConfig,
+  buildGanttHeaderGroups,
+  formatLocalYMD
+} from '../utils/agile_gantt.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -24,242 +34,54 @@ function generateDateRangeYMD(startYMD, count) {
   return list
 }
 
-function isDoneStatusName(name) {
-  if (!name) return false
-  const lower = String(name).trim().toLowerCase()
-  return lower.includes('完了') || lower.includes('done') || lower.includes('close')
-}
-
-function isTaskCompleted(task, statuses = []) {
-  if ((task.progress ?? 0) >= 100) return true
-  if (!task.status_id || !statuses || statuses.length === 0) return false
-  const st = statuses.find(s => s.id === task.status_id)
-  if (!st) return false
-  if (isDoneStatusName(st.name)) return true
-  if (statuses.length >= 2) {
-    const maxOrder = Math.max(...statuses.map(s => s.display_order))
-    if (st.display_order === maxOrder) return true
-  }
-  return false
-}
-
-function calculateSprintMetrics(tasks, statuses = []) {
-  let taskCount = 0
-  let completedTaskCount = 0
-  let totalSP = 0
-  let completedSP = 0
-  let plannedHours = 0
-  let actualHours = 0
-
-  for (const t of tasks || []) {
-    taskCount++
-    const sp = Number(t.story_points) || 0
-    const pHours = Number(t.planned_hours) || 0
-    const aHours = Number(t.actual_hours) || 0
-    totalSP += sp
-    plannedHours += pHours
-    actualHours += aHours
-
-    if (isTaskCompleted(t, statuses)) {
-      completedTaskCount++
-      completedSP += sp
-    }
-  }
-
-  totalSP = Math.round(totalSP * 10) / 10
-  completedSP = Math.round(completedSP * 10) / 10
-  plannedHours = Math.round(plannedHours * 100) / 100
-  actualHours = Math.round(actualHours * 100) / 100
-
-  const completionRate = totalSP > 0 ? Math.round((completedSP / totalSP) * 1000) / 10 : 0
-
-  return {
-    taskCount,
-    completedTaskCount,
-    totalSP,
-    completedSP,
-    completionRate,
-    plannedHours,
-    actualHours
-  }
-}
-
-function calculateVelocityStats(sprints, allTasks, statuses = []) {
-  const items = (sprints || []).map((sp) => {
-    const spTasks = (allTasks || []).filter(t => t.sprint_id === sp.id)
-    const m = calculateSprintMetrics(spTasks, statuses)
-    return {
-      id: sp.id,
-      name: sp.name,
-      status: sp.status,
-      taskCount: m.taskCount,
-      completedTaskCount: m.completedTaskCount,
-      plannedSP: m.totalSP,
-      completedSP: m.completedSP,
-      completionRate: m.completionRate
-    }
-  })
-
-  const closedItems = items.filter(i => i.status === 'closed')
-  const activeAndClosedItems = items.filter(i => i.status === 'closed' || i.status === 'active')
-  const basisItems = closedItems.length > 0 ? closedItems : activeAndClosedItems
-
-  let averageVelocity = 0
-  if (basisItems.length > 0) {
-    const sumCompleted = basisItems.reduce((acc, i) => acc + i.completedSP, 0)
-    averageVelocity = Math.round((sumCompleted / basisItems.length) * 10) / 10
-  }
-
-  const recentTarget = closedItems.length > 0
-    ? closedItems[closedItems.length - 1]
-    : activeAndClosedItems.length > 0
-      ? activeAndClosedItems[activeAndClosedItems.length - 1]
-      : items[items.length - 1]
-  const recentVelocity = recentTarget ? recentTarget.completedSP : 0
-
-  const totalPlannedAll = items.reduce((acc, i) => acc + i.plannedSP, 0)
-  const totalCompletedAll = items.reduce((acc, i) => acc + i.completedSP, 0)
-  const overallCompletionRate = totalPlannedAll > 0
-    ? Math.round((totalCompletedAll / totalPlannedAll) * 1000) / 10
-    : 0
-
-  return {
-    sprints: items,
-    sprintStats: items,
-    averageVelocity,
-    recentVelocity,
-    overallCompletionRate
-  }
-}
-
-function getGanttScaleConfig(scale) {
-  if (scale === 'day') return { baseDayWidth: 48, count: 30 }
-  if (scale === 'week') return { baseDayWidth: 16, count: 91 }
-  return { baseDayWidth: 6, count: 180 }
-}
-
-function buildGanttHeaderGroups(timelineDays, scale, dayWidth) {
-  const cfg = getGanttScaleConfig(scale)
-  const effectiveDayWidth = dayWidth !== undefined && dayWidth > 0 ? dayWidth : cfg.baseDayWidth
-  const upperGroups = []
-  const lowerGroups = []
-
-  const weekdays = ['日', '月', '火', '水', '木', '金', '土']
-
-  for (const ymd of timelineDays || []) {
-    const parts = ymd.split('-').map(Number)
-    const year = parts[0]
-    const month = parts[1]
-    const day = parts[2]
-    const dt = new Date(Date.UTC(year, month - 1, day))
-    const dow = dt.getUTCDay()
-
-    const upperLabel = scale === 'month' ? `${year}年` : `${year}年 ${month}月`
-    const lastUpper = upperGroups[upperGroups.length - 1]
-    if (lastUpper && lastUpper.label === upperLabel) {
-      lastUpper.count++
-      lastUpper.endYMD = ymd
-      lastUpper.widthPx = lastUpper.count * effectiveDayWidth
-    } else {
-      upperGroups.push({
-        key: `upper-${ymd}`,
-        label: upperLabel,
-        startYMD: ymd,
-        endYMD: ymd,
-        count: 1,
-        widthPx: effectiveDayWidth
-      })
-    }
-
-    if (scale === 'day') {
-      lowerGroups.push({
-        key: `day-${ymd}`,
-        label: `${String(day).padStart(2, '0')} (${weekdays[dow]})`,
-        startYMD: ymd,
-        endYMD: ymd,
-        count: 1,
-        widthPx: effectiveDayWidth,
-        isWeekend: dow === 0 || dow === 6
-      })
-    } else if (scale === 'week') {
-      const lastLower = lowerGroups[lowerGroups.length - 1]
-      if (!lastLower || dow === 1 || lastLower.count >= 7) {
-        lowerGroups.push({
-          key: `week-${ymd}`,
-          label: `${month}/${day}〜`,
-          startYMD: ymd,
-          endYMD: ymd,
-          count: 1,
-          widthPx: effectiveDayWidth
-        })
-      } else {
-        lastLower.count++
-        lastLower.endYMD = ymd
-        lastLower.widthPx = lastLower.count * effectiveDayWidth
-      }
-    } else {
-      const monthKey = `${year}-${String(month).padStart(2, '0')}`
-      const monthLabel = `${month}月`
-      const lastLower = lowerGroups[lowerGroups.length - 1]
-      if (lastLower && lastLower.key === `month-${monthKey}`) {
-        lastLower.count++
-        lastLower.endYMD = ymd
-        lastLower.widthPx = lastLower.count * effectiveDayWidth
-      } else {
-        lowerGroups.push({
-          key: `month-${monthKey}`,
-          label: monthLabel,
-          startYMD: ymd,
-          endYMD: ymd,
-          count: 1,
-          widthPx: effectiveDayWidth
-        })
-      }
-    }
-  }
-
-  return {
-    scale,
-    baseDayWidth: cfg.baseDayWidth,
-    defaultDayCount: cfg.count,
-    upperGroups,
-    lowerGroups,
-    totalWidthPx: (timelineDays?.length || 0) * effectiveDayWidth
-  }
-}
-
-test('isDoneStatusName and isTaskCompleted evaluate progress, status name, and max display_order', () => {
+test('isDoneStatusName, resolveDoneStatusIds, and isTaskCompleted evaluate progress, status name, and fallback display_order safely', () => {
   assert.equal(isDoneStatusName('完了'), true)
+  assert.equal(isDoneStatusName('クローズ'), true)
   assert.equal(isDoneStatusName('Done'), true)
   assert.equal(isDoneStatusName('Closed'), true)
+  assert.equal(isDoneStatusName('close'), true)
+  assert.equal(isDoneStatusName('  Close  '), true)
+  assert.equal(isDoneStatusName('disclosed'), false)
+  assert.equal(isDoneStatusName('enclosure'), false)
   assert.equal(isDoneStatusName('進行中'), false)
   assert.equal(isDoneStatusName(null), false)
+  assert.equal(isDoneStatusName(''), false)
 
+  // Single-status project: should NOT treat the single status as done unless its name matches Done
+  const singleStatus = [{ id: 'only1', name: 'Open', display_order: 1 }]
+  assert.equal(resolveDoneStatusIds(singleStatus).size, 0)
+  assert.equal(isTaskCompleted({ progress: 50, status_id: 'only1' }, singleStatus), false)
+  assert.equal(isTaskCompleted({ progress: 100, status_id: 'only1' }, singleStatus), true)
+
+  // Multi-status project with no explicit Done name -> falls back to max display_order
   const statuses = [
     { id: 's1', name: '未着手', display_order: 1 },
     { id: 's2', name: '進行中', display_order: 2 },
     { id: 's3', name: 'レビュー済', display_order: 3 }
   ]
+  assert.deepEqual([...resolveDoneStatusIds(statuses)], ['s3'])
 
   // 1. Completed by progress === 100
   assert.equal(isTaskCompleted({ progress: 100, status_id: 's1' }, statuses), true)
 
-  // 2. Completed by status name ('完了' / 'Done') even if not max display_order
+  // 2. '完了' + 'Archive' columns: only '完了' is resolved as done, NOT 'Archive'
   const customStatuses = [
     { id: 'c1', name: 'Open', display_order: 1 },
     { id: 'c2', name: '完了 (Done)', display_order: 2 },
     { id: 'c3', name: 'Archive', display_order: 3 }
   ]
+  assert.deepEqual([...resolveDoneStatusIds(customStatuses)], ['c2'])
   assert.equal(isTaskCompleted({ progress: 50, status_id: 'c2' }, customStatuses), true)
+  assert.equal(isTaskCompleted({ progress: 50, status_id: 'c3' }, customStatuses), false)
 
-  // 3. Completed by max display_order status when statuses.length >= 2
+  // 3. Completed by max display_order status when no explicit done status name exists and statuses.length >= 2
   assert.equal(isTaskCompleted({ progress: 80, status_id: 's3' }, statuses), true)
 
   // 4. Incomplete task
   assert.equal(isTaskCompleted({ progress: 40, status_id: 's2' }, statuses), false)
 })
 
-test('calculateSprintMetrics computes planned SP, completed SP, completion rate, and handles edge cases', () => {
+test('calculateSprintMetrics computes planned SP, completed SP, completion rate, and falls back to authoritative sprintObj', () => {
   const statuses = [
     { id: 's1', name: 'Todo', display_order: 1 },
     { id: 's2', name: 'In Progress', display_order: 2 },
@@ -282,13 +104,31 @@ test('calculateSprintMetrics computes planned SP, completed SP, completion rate,
   assert.equal(metrics.plannedHours, 36)
   assert.equal(metrics.actualHours, 17)
 
-  // Edge case: 0 tasks
+  // Edge case: 0 tasks without sprintObj
   const emptyMetrics = calculateSprintMetrics([], statuses)
   assert.equal(emptyMetrics.taskCount, 0)
   assert.equal(emptyMetrics.completedTaskCount, 0)
   assert.equal(emptyMetrics.totalSP, 0)
   assert.equal(emptyMetrics.completedSP, 0)
   assert.equal(emptyMetrics.completionRate, 0)
+
+  // Fallback to authoritative sprintObj when tasks is empty
+  const fallbackMetrics = calculateSprintMetrics([], statuses, {
+    id: 'sp-auth',
+    task_count: 5,
+    completed_task_count: 3,
+    total_story_points: 20,
+    completed_story_points: 15,
+    total_planned_hours: 40,
+    total_actual_hours: 28
+  })
+  assert.equal(fallbackMetrics.taskCount, 5)
+  assert.equal(fallbackMetrics.completedTaskCount, 3)
+  assert.equal(fallbackMetrics.totalSP, 20)
+  assert.equal(fallbackMetrics.completedSP, 15)
+  assert.equal(fallbackMetrics.completionRate, 75)
+  assert.equal(fallbackMetrics.plannedHours, 40)
+  assert.equal(fallbackMetrics.actualHours, 28)
 
   // Edge case: tasks with null SP only
   const nullSpMetrics = calculateSprintMetrics([{ id: 't5', story_points: null, progress: 100, status_id: 's3' }], statuses)
@@ -297,17 +137,17 @@ test('calculateSprintMetrics computes planned SP, completed SP, completion rate,
   assert.equal(nullSpMetrics.completionRate, 0)
 })
 
-test('calculateVelocityStats computes per-sprint velocity and average velocity across closed sprints', () => {
+test('calculateVelocityStats computes per-sprint velocity and uses authoritative Sprint fields when allTasks is filtered or empty', () => {
   const statuses = [
     { id: 's1', name: 'Todo', display_order: 1 },
     { id: 's2', name: 'Done', display_order: 2 }
   ]
 
   const sprints = [
-    { id: 'sp1', name: 'Sprint 1', status: 'closed' },
-    { id: 'sp2', name: 'Sprint 2', status: 'closed' },
-    { id: 'sp3', name: 'Sprint 3', status: 'active' },
-    { id: 'sp4', name: 'Sprint 4', status: 'planned' }
+    { id: 'sp1', name: 'Sprint 1', status: 'closed', task_count: 2, completed_task_count: 2, total_story_points: 15, completed_story_points: 15 },
+    { id: 'sp2', name: 'Sprint 2', status: 'closed', task_count: 2, completed_task_count: 1, total_story_points: 20, completed_story_points: 12 },
+    { id: 'sp3', name: 'Sprint 3', status: 'active', task_count: 1, completed_task_count: 1, total_story_points: 8, completed_story_points: 8 },
+    { id: 'sp4', name: 'Sprint 4', status: 'planned', task_count: 0, completed_task_count: 0, total_story_points: 0, completed_story_points: 0 }
   ]
 
   const allTasks = [
@@ -327,9 +167,23 @@ test('calculateVelocityStats computes per-sprint velocity and average velocity a
   assert.equal(stats.averageVelocity, 13.5)
   assert.equal(stats.recentVelocity, 12)
 
+  // Authoritative fallback when allTasks is empty or filtered (e.g. closed issues excluded)
+  const filteredStats = calculateVelocityStats(sprints, [], statuses)
+  assert.equal(filteredStats.sprints[0].plannedSP, 15)
+  assert.equal(filteredStats.sprints[0].completedSP, 15)
+  assert.equal(filteredStats.sprints[1].plannedSP, 20)
+  assert.equal(filteredStats.sprints[1].completedSP, 12)
+  assert.equal(filteredStats.averageVelocity, 13.5)
+  assert.equal(filteredStats.recentVelocity, 12)
+
   // Fallback when no closed sprints exist yet (uses active sprint)
   const activeOnlyStats = calculateVelocityStats([sprints[2], sprints[3]], allTasks, statuses)
   assert.equal(activeOnlyStats.averageVelocity, 8)
+})
+
+test('formatLocalYMD formats local calendar dates without UTC shifts', () => {
+  const sample = new Date(2026, 10, 5, 23, 55, 0) // Local Nov 5, 2026
+  assert.equal(formatLocalYMD(sample), '2026-11-05')
 })
 
 test('buildGanttHeaderGroups differentiates day, week, and month scales with exact width sums', () => {
@@ -400,4 +254,5 @@ test('Source files contain required Agile/Scrum and UX enhancements', () => {
   assert.ok(projectPageSrc.includes('buildGanttHeaderGroups'))
   assert.ok(projectPageSrc.includes('sprintsWithDates'))
   assert.ok(projectPageSrc.includes('filters.sprint_id'))
+  assert.ok(projectPageSrc.includes('allProjectIssues'))
 })

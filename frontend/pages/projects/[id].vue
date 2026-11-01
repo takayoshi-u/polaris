@@ -3385,7 +3385,7 @@ async function exportProjectCSV() {
     const a = document.createElement('a')
     a.href = url
     const pName = (project.value?.name || 'project').replace(/[^\w\s-]/gi, '_')
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const today = formatLocalYMD().replace(/-/g, '')
     a.download = `polaris_${pName}_${today}.csv`
     document.body.appendChild(a)
     a.click()

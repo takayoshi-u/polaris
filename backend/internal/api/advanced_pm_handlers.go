@@ -118,6 +118,7 @@ func (s *Server) handleCreateSprint(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSprint(w http.ResponseWriter, r *http.Request) {
 	sprintID := r.PathValue("sprintId")
+	projectID := r.PathValue("projectId")
 	userID := s.getUserID(r)
 
 	sp, err := s.store.GetSprint(r.Context(), sprintID, userID)
@@ -125,12 +126,29 @@ func (s *Server) handleGetSprint(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, err)
 		return
 	}
+	if projectID != "" && sp.ProjectID != projectID {
+		s.respondError(w, store.ErrNotFound)
+		return
+	}
 	s.respondJSON(w, http.StatusOK, sp)
 }
 
 func (s *Server) handleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 	sprintID := r.PathValue("sprintId")
+	projectID := r.PathValue("projectId")
 	userID := s.getUserID(r)
+
+	if projectID != "" {
+		existing, err := s.store.GetSprint(r.Context(), sprintID, userID)
+		if err != nil {
+			s.respondError(w, err)
+			return
+		}
+		if existing.ProjectID != projectID {
+			s.respondError(w, store.ErrNotFound)
+			return
+		}
+	}
 
 	var in store.SprintUpdateInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -148,7 +166,20 @@ func (s *Server) handleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteSprint(w http.ResponseWriter, r *http.Request) {
 	sprintID := r.PathValue("sprintId")
+	projectID := r.PathValue("projectId")
 	userID := s.getUserID(r)
+
+	if projectID != "" {
+		existing, err := s.store.GetSprint(r.Context(), sprintID, userID)
+		if err != nil {
+			s.respondError(w, err)
+			return
+		}
+		if existing.ProjectID != projectID {
+			s.respondError(w, store.ErrNotFound)
+			return
+		}
+	}
 
 	if err := s.store.DeleteSprint(r.Context(), sprintID, userID); err != nil {
 		s.respondError(w, err)

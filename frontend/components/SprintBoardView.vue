@@ -1103,25 +1103,7 @@ async function confirmRolloverAndCloseSprint() {
   const s = closingSprint.value
   isProcessingRollover.value = true
   try {
-    if (rolloverAction.value === 'next_sprint' && !rolloverTargetSprintId.value) {
-      // Auto-create next sprint if none exists
-      const today = new Date()
-      const endDt = new Date()
-      endDt.setDate(endDt.getDate() + 14)
-      const created = await apiFetch<Sprint>(`/projects/${props.projectId}/sprints`, {
-        method: 'POST',
-        body: JSON.stringify({
-          name: `Sprint ${props.sprints.length + 1}`,
-          goal: '',
-          start_date: formatLocalYMD(today),
-          end_date: formatLocalYMD(endDt),
-          status: 'planned'
-        })
-      })
-      rolloverTargetSprintId.value = created.id
-    }
-
-    await apiFetch(`/projects/${props.projectId}/sprints/${s.id}`, {
+    await apiFetch(`/sprints/${s.id}`, {
       method: 'PUT',
       body: JSON.stringify({
         status: 'closed',

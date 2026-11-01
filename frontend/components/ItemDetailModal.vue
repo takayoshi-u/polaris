@@ -1188,7 +1188,7 @@ import type {
   TemplateRow,
   User
 } from '~/types/polaris'
-import { formatCost, formatFileSize, formatHours, formatJSTDateTime, hasAtMostTwoDecimals, renderSafeMarkdown } from '~/utils/format'
+import { formatCost, formatFileSize, formatHours, formatJSTDateTime, formatLocalYMD, hasAtMostTwoDecimals, renderSafeMarkdown } from '~/utils/format'
 
 const props = defineProps<{
   projectId: string
@@ -1268,7 +1268,7 @@ async function onOwnerSelectChange(newOwnerId: string) {
   await transferOwner(newOwnerId)
 }
 
-const todayStr = computed(() => new Date().toISOString().slice(0, 10))
+const todayStr = computed(() => formatLocalYMD())
 function setTodayAsActualEnd() {
   form.actual_end_date = todayStr.value
 }

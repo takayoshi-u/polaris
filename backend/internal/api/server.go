@@ -271,6 +271,9 @@ func (s *Server) registerRoutes() {
 	// Sprints
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/sprints", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListSprints)))
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/sprints", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleCreateSprint)))
+	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/sprints/{sprintId}", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleGetSprint)))
+	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}/sprints/{sprintId}", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleUpdateSprint)))
+	s.mux.HandleFunc("DELETE /api/v1/projects/{projectId}/sprints/{sprintId}", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleDeleteSprint)))
 	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("read:projects", s.handleGetSprint)))
 	s.mux.HandleFunc("PUT /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("write:projects", s.handleUpdateSprint)))
 	s.mux.HandleFunc("DELETE /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("write:projects", s.handleDeleteSprint)))

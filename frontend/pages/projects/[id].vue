@@ -214,14 +214,70 @@
             ドラッグ＆ドロップでステータス変更・親課題の付け替え・表示順序の調整が可能です
           </p>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <!-- Status Column Quick Jump -->
+          <div v-if="statuses.length > 0" style="display: flex; align-items: center; gap: 6px;">
+            <select
+              style="padding: 4px 8px; font-size: 12px; height: 28px; border-radius: 6px;"
+              aria-label="列へジャンプ"
+              @change="onJumpSelect($event)"
+            >
+              <option value="" disabled selected>📍 列へ移動...</option>
+              <option v-for="(st, idx) in statuses" :key="st.id" :value="idx">
+                {{ st.display_order }}. {{ st.name }} ({{ countTasksByStatus(st.id) }}件)
+              </option>
+            </select>
+          </div>
+
+          <!-- Horizontal Scroll Navigation Buttons (1 column / ~280px smooth scroll) -->
+          <div v-if="kanbanIsOverflowing" style="display: inline-flex; align-items: center; gap: 4px;">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              style="padding: 2px 8px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px;"
+              :disabled="!kanbanCanScrollLeft"
+              title="左へスクロール"
+              aria-label="左へスクロール"
+              @click="scrollKanban('left')"
+            >
+              ◀
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              style="padding: 2px 8px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px;"
+              :disabled="!kanbanCanScrollRight"
+              title="右へスクロール"
+              aria-label="右へスクロール"
+              @click="scrollKanban('right')"
+            >
+              ▶
+            </button>
+          </div>
+
           <button type="button" class="btn btn-secondary btn-sm" @click="expandAllIssues">すべて展開</button>
           <button type="button" class="btn btn-secondary btn-sm" @click="collapseAllIssues">すべて折りたたむ</button>
         </div>
       </div>
 
+      <!-- Top Synchronized Scrollbar Container -->
+      <div
+        v-show="kanbanIsOverflowing"
+        ref="kanbanTopScrollRef"
+        class="kanban-top-scroll-wrapper"
+        style="overflow-x: auto; overflow-y: hidden; width: 100%; height: 10px; margin-bottom: -6px; z-index: 15; position: sticky; top: 0; background: var(--bg-main);"
+        @scroll="onTopScroll"
+      >
+        <div :style="{ minWidth: `${Math.max(statuses.length, 1) * 260}px`, height: '1px' }"></div>
+      </div>
+
       <!-- Scrollable Unified Kanban Container -->
-      <div class="kanban-scroll-wrapper" style="overflow-x: auto; width: 100%; padding-bottom: 12px;">
+      <div
+        ref="kanbanScrollContainerRef"
+        class="kanban-scroll-wrapper"
+        style="overflow-x: auto; width: 100%; padding-bottom: 12px;"
+        @scroll="onMainScroll"
+      >
         <div :style="{ minWidth: `${Math.max(statuses.length, 1) * 260}px`, display: 'flex', flexDirection: 'column', gap: '14px' }">
           <!-- Status Column Headers (Sticky Top) -->
           <div
@@ -1709,6 +1765,12 @@ import {
   generateDateRangeYMD,
   hasAtMostTwoDecimals
 } from '~/utils/format'
+import {
+  calculateColumnOffset,
+  calculateNextScrollLeft,
+  getScrollBounds,
+  isOverflowing
+} from '~/utils/kanban_scroll'
 
 const PRESET_COLORS = [
   '#3b82f6', // blue
@@ -2173,8 +2235,83 @@ function onProjectGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+// Kanban Horizontal Scroll Assistant
+const kanbanScrollContainerRef = ref<HTMLElement | null>(null)
+const kanbanTopScrollRef = ref<HTMLElement | null>(null)
+const kanbanIsOverflowing = ref(false)
+const kanbanCanScrollLeft = ref(false)
+const kanbanCanScrollRight = ref(false)
+let isSyncingScroll = false
+let kanbanResizeObserver: ResizeObserver | null = null
+
+function updateKanbanScrollState() {
+  const el = kanbanScrollContainerRef.value
+  if (!el) {
+    kanbanIsOverflowing.value = false
+    kanbanCanScrollLeft.value = false
+    kanbanCanScrollRight.value = false
+    return
+  }
+  kanbanIsOverflowing.value = isOverflowing(el.scrollWidth, el.clientWidth)
+  const bounds = getScrollBounds(el.scrollLeft, el.clientWidth, el.scrollWidth)
+  kanbanCanScrollLeft.value = bounds.canScrollLeft
+  kanbanCanScrollRight.value = bounds.canScrollRight
+}
+
+function onMainScroll() {
+  if (isSyncingScroll) return
+  if (kanbanScrollContainerRef.value && kanbanTopScrollRef.value) {
+    isSyncingScroll = true
+    kanbanTopScrollRef.value.scrollLeft = kanbanScrollContainerRef.value.scrollLeft
+    requestAnimationFrame(() => {
+      isSyncingScroll = false
+    })
+  }
+  updateKanbanScrollState()
+}
+
+function onTopScroll() {
+  if (isSyncingScroll) return
+  if (kanbanTopScrollRef.value && kanbanScrollContainerRef.value) {
+    isSyncingScroll = true
+    kanbanScrollContainerRef.value.scrollLeft = kanbanTopScrollRef.value.scrollLeft
+    requestAnimationFrame(() => {
+      isSyncingScroll = false
+    })
+  }
+  updateKanbanScrollState()
+}
+
+function scrollKanban(direction: 'left' | 'right') {
+  const el = kanbanScrollContainerRef.value
+  if (!el) return
+  const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+  const target = calculateNextScrollLeft(el.scrollLeft, direction, 280, maxScroll)
+  el.scrollTo({ left: target, behavior: 'smooth' })
+}
+
+function scrollToColumn(index: number) {
+  const el = kanbanScrollContainerRef.value
+  if (!el) return
+  const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+  const target = calculateColumnOffset(index, statuses.value.length, el.scrollWidth, maxScroll)
+  el.scrollTo({ left: target, behavior: 'smooth' })
+}
+
+function onJumpSelect(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const idx = parseInt(target.value, 10)
+  if (!Number.isNaN(idx)) {
+    scrollToColumn(idx)
+  }
+  target.value = ''
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onProjectGlobalKeydown)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateKanbanScrollState)
+  }
   await loadWorkspace()
   nextTick(() => {
     updateTimelinePaneWidth()
@@ -2186,15 +2323,35 @@ onMounted(async () => {
       })
       timelineResizeObserver.observe(timelinePaneRef.value)
     }
+    updateKanbanScrollState()
+    if (kanbanScrollContainerRef.value && typeof ResizeObserver !== 'undefined') {
+      kanbanResizeObserver = new ResizeObserver(() => {
+        updateKanbanScrollState()
+      })
+      kanbanResizeObserver.observe(kanbanScrollContainerRef.value)
+    }
   })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onProjectGlobalKeydown)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateKanbanScrollState)
+  }
   if (timelineResizeObserver) {
     timelineResizeObserver.disconnect()
     timelineResizeObserver = null
   }
+  if (kanbanResizeObserver) {
+    kanbanResizeObserver.disconnect()
+    kanbanResizeObserver = null
+  }
+})
+
+watch([() => statuses.value.length, () => activeTab.value, () => issues.value.length], () => {
+  nextTick(() => {
+    updateKanbanScrollState()
+  })
 })
 
 watch(() => route.params.id, async () => {

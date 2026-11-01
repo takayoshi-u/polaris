@@ -1293,7 +1293,7 @@
     </section>
 
     <!-- New Issue Modal (with create_initial_task toggle) -->
-    <div v-if="showNewIssueModal" class="modal-backdrop" @click.self="showNewIssueModal = false">
+    <div v-if="showNewIssueModal" class="modal-backdrop" v-backdrop-dismiss="() => showNewIssueModal = false">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規課題（Issue）作成</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitNewIssue">
@@ -1320,7 +1320,7 @@
     </div>
 
     <!-- New Task Modal -->
-    <div v-if="showNewTaskModal" class="modal-backdrop" @click.self="showNewTaskModal = false">
+    <div v-if="showNewTaskModal" class="modal-backdrop" v-backdrop-dismiss="() => showNewTaskModal = false">
       <div class="modal-panel" style="max-width: 560px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">
           新規子タスク作成（親課題: {{ newTaskParentIssue?.title }}）
@@ -1379,7 +1379,7 @@
     </div>
 
     <!-- New Webhook Modal -->
-    <div v-if="showNewWebhookModal" class="modal-backdrop" @click.self="showNewWebhookModal = false">
+    <div v-if="showNewWebhookModal" class="modal-backdrop" v-backdrop-dismiss="() => showNewWebhookModal = false">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規 Webhook の登録</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createProjectWebhook">
@@ -1437,7 +1437,7 @@
     </div>
 
     <!-- Webhook Deliveries Modal -->
-    <div v-if="selectedWebhookForLogs" class="modal-backdrop" @click.self="selectedWebhookForLogs = null">
+    <div v-if="selectedWebhookForLogs" class="modal-backdrop" v-backdrop-dismiss="() => selectedWebhookForLogs = null">
       <div class="modal-panel" style="max-width: 680px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
           <h3 style="font-size: 15px; font-weight: 700;">配信ログ: {{ selectedWebhookForLogs.name }}</h3>
@@ -1487,7 +1487,7 @@
     </div>
 
     <!-- Edit Webhook Modal -->
-    <div v-if="editingWebhook" class="modal-backdrop" @click.self="editingWebhook = null">
+    <div v-if="editingWebhook" class="modal-backdrop" v-backdrop-dismiss="() => editingWebhook = null">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Webhook の編集</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="updateProjectWebhook">
@@ -1525,7 +1525,7 @@
     </div>
 
     <!-- New Inbound Webhook Modal -->
-    <div v-if="showNewInboundWebhookModal" class="modal-backdrop" @click.self="showNewInboundWebhookModal = false">
+    <div v-if="showNewInboundWebhookModal" class="modal-backdrop" v-backdrop-dismiss="() => showNewInboundWebhookModal = false">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規 Inbound Webhook の登録</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createInboundWebhook">
@@ -1556,7 +1556,7 @@
     </div>
 
     <!-- Inbound Webhook Created Dialog (One-time token & secret display) -->
-    <div v-if="createdInboundWebhook" class="modal-backdrop" @click.self="createdInboundWebhook = null">
+    <div v-if="createdInboundWebhook" class="modal-backdrop" v-backdrop-dismiss="() => createdInboundWebhook = null">
       <div class="modal-panel" style="max-width: 620px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
           <h3 style="font-size: 16px; font-weight: 700; color: #10b981;">
@@ -1617,7 +1617,7 @@
     </div>
 
     <!-- Edit Project Type Modal -->
-    <div v-if="editingProjectType" class="modal-backdrop" @click.self="editingProjectType = null">
+    <div v-if="editingProjectType" class="modal-backdrop" v-backdrop-dismiss="() => editingProjectType = null">
       <div class="modal-panel" style="max-width: 460px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
           <h3 style="font-size: 15px; font-weight: 700;">プロジェクト種別の編集</h3>

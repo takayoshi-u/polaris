@@ -10,7 +10,7 @@
       justify-content: center;
       padding: 16px;
     "
-    @click.self="$emit('close')"
+    v-backdrop-dismiss="() => $emit('close')"
   >
     <div class="card" style="width: 100%; max-width: 580px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
       <!-- Modal Header -->

@@ -352,6 +352,12 @@ func TestBulkDirectUserRegistration_TempPasswordEnforcement(t *testing.T) {
 	if res.FailedCount != 2 {
 		t.Fatalf("step 1: expected failed_count 2, got %d", res.FailedCount)
 	}
+	if res.Succeeded != 2 {
+		t.Fatalf("step 1: expected succeeded 2, got %d", res.Succeeded)
+	}
+	if res.Failed != 2 {
+		t.Fatalf("step 1: expected failed 2, got %d", res.Failed)
+	}
 	if len(res.CreatedUsers) != 2 {
 		t.Fatalf("step 1: expected 2 CreatedUsers, got %d", len(res.CreatedUsers))
 	}

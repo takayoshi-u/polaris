@@ -869,6 +869,8 @@ func (s *Store) BulkCreateDirectUsers(ctx context.Context, req domain.BulkDirect
 
 	result.CreatedCount = len(result.CreatedUsers)
 	result.FailedCount = len(result.Failures)
+	result.Succeeded = result.CreatedCount
+	result.Failed = result.FailedCount
 
 	return result, nil
 }

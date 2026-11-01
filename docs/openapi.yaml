@@ -1172,6 +1172,10 @@ components:
           type: integer
         failed_count:
           type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
         created_users:
           type: array
           items:

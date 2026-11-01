@@ -46,15 +46,15 @@
           :style="{
             padding: '16px',
             borderRadius: '8px',
-            background: directResult.succeeded > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-            border: `1px solid ${directResult.succeeded > 0 ? '#10b981' : '#ef4444'}`
+            background: succeededCount > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+            border: `1px solid ${succeededCount > 0 ? '#10b981' : '#ef4444'}`
           }"
         >
-          <div style="font-size: 15px; font-weight: 700;" :style="{ color: directResult.succeeded > 0 ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)' }">
-            {{ directResult.succeeded > 0 ? `🎉 ${directResult.succeeded} 件 のアカウントを登録しました` : '一括直接登録を実行できませんでした' }}
+          <div style="font-size: 15px; font-weight: 700;" :style="{ color: succeededCount > 0 ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)' }">
+            {{ succeededCount > 0 ? `🎉 ${succeededCount} 件 のアカウントを登録しました` : '一括直接登録を実行できませんでした' }}
           </div>
           <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-            全 {{ directResult.total }} 件中 / 成功: {{ directResult.succeeded }} 件 / 失敗・スキップ: {{ directResult.failed }} 件
+            全 {{ totalCount }} 件中 / 成功: {{ succeededCount }} 件 / 失敗・スキップ: {{ failedCount }} 件
           </div>
         </div>
 
@@ -386,6 +386,19 @@ const selectedPermissions = ref<string[]>([])
 const isSubmitting = ref(false)
 const directResult = ref<BulkDirectUserResult | null>(null)
 
+const succeededCount = computed(() => {
+  if (!directResult.value) return 0
+  return directResult.value.succeeded ?? directResult.value.created_count ?? directResult.value.created_users?.length ?? 0
+})
+const failedCount = computed(() => {
+  if (!directResult.value) return 0
+  return directResult.value.failed ?? directResult.value.failed_count ?? directResult.value.failures?.length ?? 0
+})
+const totalCount = computed(() => {
+  if (!directResult.value) return 0
+  return directResult.value.total ?? (succeededCount.value + failedCount.value)
+})
+
 const existingEmailsSet = computed(() => {
   const set = new Set<string>()
   for (const u of props.existingUsers) {
@@ -479,8 +492,9 @@ async function executeBulkDirect() {
       body: JSON.stringify(payload)
     })
     directResult.value = res
-    if (res.succeeded > 0) {
-      notifyToast(`${res.succeeded} 件のユーザーを直接登録しました`, 'success')
+    const successCount = res.succeeded ?? res.created_count ?? res.created_users?.length ?? 0
+    if (successCount > 0) {
+      notifyToast(`${successCount} 件のユーザーを直接登録しました`, 'success')
     }
   } catch (err: any) {
     notifyToast(err.message || '一括直接登録に失敗しました', 'error')

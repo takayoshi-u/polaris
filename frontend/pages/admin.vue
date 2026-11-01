@@ -90,7 +90,16 @@
             <div style="font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
               <span>👤</span><span>アカウントを直接登録</span>
             </div>
-            <span class="badge badge-green" style="font-size: 10px;">パスワード設定</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                @click="showBulkDirectModal = true"
+              >
+                📥 リストから一括直接登録
+              </button>
+              <span class="badge badge-green" style="font-size: 10px;">パスワード設定</span>
+            </div>
           </div>
           <form style="display: flex; flex-direction: column; gap: 8px;" @submit.prevent="createDirectUser">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -130,6 +139,10 @@
                 </button>
               </div>
             </div>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; margin-top: 4px;">
+              <input v-model="directUserForm.must_change_password" type="checkbox" />
+              <span>初回ログイン時にパスワード変更を強制する (仮パスワード)</span>
+            </label>
           </form>
         </div>
 
@@ -1523,6 +1536,16 @@
       @close="showBulkInviteModal = false"
       @invited="loadAdminData"
     />
+
+    <!-- Bulk Direct User Modal -->
+    <BulkDirectUserModal
+      v-if="showBulkDirectModal"
+      :allowed-domains="allowedDomainsList"
+      :existing-users="users"
+      :groups="globalGroups"
+      @close="showBulkDirectModal = false"
+      @created="loadAdminData"
+    />
   </div>
 </template>
 
@@ -1605,6 +1628,7 @@ const userStatusFilter = ref<'all' | 'active' | 'invited' | 'disabled'>('all')
 const userPage = ref(1)
 const userPageSize = 10
 const showBulkInviteModal = ref(false)
+const showBulkDirectModal = ref(false)
 
 const filteredUsers = computed(() => {
   let list = users.value
@@ -1714,7 +1738,8 @@ const userActionFeedback = reactive({
 const directUserForm = reactive({
   email: '',
   display_name: '',
-  password: ''
+  password: '',
+  must_change_password: true
 })
 const showDirectPassword = ref(false)
 
@@ -2027,6 +2052,7 @@ async function createDirectUser() {
     directUserForm.email = ''
     directUserForm.display_name = ''
     directUserForm.password = ''
+    directUserForm.must_change_password = true
     userActionFeedback.type = 'success'
     userActionFeedback.text = `✓ ユーザー「${created.display_name} (${created.email})」を直接登録しました（すぐログイン可能です）`
     notifyToast(`ユーザー「${created.display_name}」を直接登録しました`, 'success')

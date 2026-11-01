@@ -94,8 +94,10 @@ func (s *Server) registerRoutes() {
 
 	// Authenticated Account Endpoints
 	s.mux.HandleFunc("GET /api/v1/auth/me", s.requireAuth(s.handleGetMe))
+	s.mux.HandleFunc("GET /api/v1/users/me", s.requireAuth(s.handleGetMe))
 	s.mux.HandleFunc("PUT /api/v1/auth/me/profile", s.requireAuth(s.handleUpdateMyProfile))
 	s.mux.HandleFunc("PUT /api/v1/auth/me/password", s.requireAuth(s.handleUpdateMyPassword))
+	s.mux.HandleFunc("PUT /api/v1/users/me/password", s.requireAuth(s.handleUpdateMyPassword))
 	s.mux.HandleFunc("POST /api/v1/auth/me/email-change", s.requireAuth(s.handleRequestMyEmailChange))
 	s.mux.HandleFunc("GET /api/v1/auth/mfa/status", s.requireAuth(s.handleMFAStatus))
 	s.mux.HandleFunc("POST /api/v1/auth/mfa/totp/setup", s.requireAuth(s.handleTOTPSetup))
@@ -122,6 +124,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/users", s.requireSystemPerm(domain.PermManageSystem, s.handleCreateUser))
 	s.mux.HandleFunc("POST /api/v1/users/invite", s.requireSystemPerm(domain.PermManageSystem, s.handleInviteUser))
 	s.mux.HandleFunc("POST /api/v1/users/bulk-invite", s.requireSystemPerm(domain.PermManageSystem, s.handleBulkInviteUsers))
+	s.mux.HandleFunc("POST /api/v1/users/bulk-direct", s.requireSystemPerm(domain.PermManageSystem, s.handleBulkCreateDirectUsers))
 	s.mux.HandleFunc("POST /api/v1/users/{userId}/resend-invite", s.requireSystemPerm(domain.PermManageSystem, s.handleResendInvite))
 	s.mux.HandleFunc("PUT /api/v1/users/{userId}/email", s.requireSystemPerm(domain.PermManageSystem, s.handleAdminChangeUserEmail))
 	s.mux.HandleFunc("PUT /api/v1/users/{userId}/status", s.requireSystemPerm(domain.PermManageSystem, s.handleUpdateUserStatus))
@@ -409,6 +412,22 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			u = sessionUser
+		}
+
+		if u.MustChangePassword {
+			path := r.URL.Path
+			method := r.Method
+			isAllowed := path == "/api/v1/auth/me" ||
+				path == "/api/v1/users/me" ||
+				path == "/api/v1/auth/logout" ||
+				(method == http.MethodPut && (path == "/api/v1/auth/me/password" || path == "/api/v1/users/me/password"))
+			if !isAllowed {
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"error":   "PASSWORD_CHANGE_REQUIRED",
+					"message": "Temporary password must be changed before accessing Polaris",
+				})
+				return
+			}
 		}
 
 		if !u.MFAEnabled {

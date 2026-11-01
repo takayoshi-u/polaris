@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -298,9 +299,9 @@ func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, e
 	var u domain.User
 	var pwHash, googleSub sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, mfa_enabled, mfa_enforced, created_at, updated_at
+		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, mfa_enabled, mfa_enforced, must_change_password, created_at, updated_at
 		FROM users WHERE id = $1
-	`, userID).Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.MFAEnabled, &u.MFAEnforced, &u.CreatedAt, &u.UpdatedAt)
+	`, userID).Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.MFAEnabled, &u.MFAEnforced, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -321,7 +322,7 @@ func (s *Store) GetUserByID(ctx context.Context, userID string) (*domain.User, e
 
 func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, mfa_enabled, mfa_enforced, created_at, updated_at
+		SELECT id, email, password_hash, google_sub, display_name, avatar_url, status, mfa_enabled, mfa_enforced, must_change_password, created_at, updated_at
 		FROM users ORDER BY id ASC
 	`)
 	if err != nil {
@@ -333,7 +334,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 	for rows.Next() {
 		var u domain.User
 		var pwHash, googleSub sql.NullString
-		if err := rows.Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.MFAEnabled, &u.MFAEnforced, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &pwHash, &googleSub, &u.DisplayName, &u.AvatarURL, &u.Status, &u.MFAEnabled, &u.MFAEnforced, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.HasPassword = pwHash.Valid && pwHash.String != ""
@@ -351,7 +352,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]domain.User, error) {
 }
 
 // CreateUserDirect registers a new user account directly in 'active' status with an initial password.
-func (s *Store) CreateUserDirect(ctx context.Context, email, displayName, password string, groupIDs []string, permissions []string) (*domain.User, error) {
+func (s *Store) CreateUserDirect(ctx context.Context, email, displayName, password string, mustChangePassword bool, groupIDs []string, permissions []string) (*domain.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	allowedDomains, err := s.GetAllowedDomains(ctx)
 	if err != nil {
@@ -386,9 +387,9 @@ func (s *Store) CreateUserDirect(ctx context.Context, email, displayName, passwo
 	userID := id.NewV7String()
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO users (id, email, password_hash, display_name, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
-	`, userID, email, pwHash, displayName, domain.UserStatusActive, now); err != nil {
+		INSERT INTO users (id, email, password_hash, display_name, status, must_change_password, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+	`, userID, email, pwHash, displayName, domain.UserStatusActive, mustChangePassword, now); err != nil {
 		return nil, err
 	}
 
@@ -668,6 +669,210 @@ func (s *Store) BulkInviteUsers(ctx context.Context, invitations []domain.UserIn
 	return result, nil
 }
 
+func generateSecureTempPassword() string {
+	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!#$%"
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		tok, _, _ := crypto.GenerateRandomToken(9)
+		if len(tok) >= 12 {
+			return tok[:12]
+		}
+		return tok
+	}
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
+}
+
+// BulkCreateDirectUsers directly registers multiple user accounts in active status, assigning initial/temporary passwords.
+func (s *Store) BulkCreateDirectUsers(ctx context.Context, req domain.BulkDirectUserRequest) (*domain.BulkDirectUserResult, error) {
+	allowedDomains, err := s.GetAllowedDomains(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &domain.BulkDirectUserResult{
+		Total:        len(req.Users),
+		CreatedUsers: []domain.BulkDirectUserCredential{},
+		Failures:     []domain.BulkDirectUserFailure{},
+	}
+
+	seenInBatch := make(map[string]bool)
+
+	for _, item := range req.Users {
+		rawEmail := strings.TrimSpace(item.Email)
+		cleanEmail := strings.ToLower(rawEmail)
+
+		if cleanEmail == "" || !strings.Contains(cleanEmail, "@") {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "メールアドレスの形式が不正です",
+			})
+			continue
+		}
+
+		if err := domain.ValidateEmailAllowedDomain(cleanEmail, allowedDomains); err != nil {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "メールアドレスのドメインが許可されていません",
+			})
+			continue
+		}
+
+		if seenInBatch[cleanEmail] {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "既に登録されているユーザーです",
+			})
+			continue
+		}
+		seenInBatch[cleanEmail] = true
+
+		var existingCount int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND status != 'disabled'`, cleanEmail).Scan(&existingCount); err != nil {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "データベースエラーが発生しました",
+			})
+			continue
+		}
+		if existingCount > 0 {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "既に登録されているユーザーです",
+			})
+			continue
+		}
+
+		tempPassword := strings.TrimSpace(item.Password)
+		if tempPassword == "" {
+			tempPassword = strings.TrimSpace(req.DefaultPassword)
+		}
+		if tempPassword == "" {
+			tempPassword = generateSecureTempPassword()
+		}
+
+		pwHash, err := crypto.HashPassword(tempPassword)
+		if err != nil {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "パスワードのハッシュ化に失敗しました",
+			})
+			continue
+		}
+
+		displayName := strings.TrimSpace(item.DisplayName)
+		if displayName == "" {
+			displayName = strings.Split(cleanEmail, "@")[0]
+		}
+
+		groupMap := make(map[string]bool)
+		for _, g := range req.DefaultGroupIDs {
+			if strings.TrimSpace(g) != "" {
+				groupMap[strings.TrimSpace(g)] = true
+			}
+		}
+		for _, g := range item.GroupIDs {
+			if strings.TrimSpace(g) != "" {
+				groupMap[strings.TrimSpace(g)] = true
+			}
+		}
+
+		permMap := make(map[string]bool)
+		for _, p := range req.DefaultPermissions {
+			if strings.TrimSpace(p) != "" {
+				permMap[strings.TrimSpace(p)] = true
+			}
+		}
+		for _, p := range item.Permissions {
+			if strings.TrimSpace(p) != "" {
+				permMap[strings.TrimSpace(p)] = true
+			}
+		}
+
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "データベースエラーが発生しました",
+			})
+			continue
+		}
+
+		userID := id.NewV7String()
+		now := time.Now().UTC()
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO users (id, email, password_hash, display_name, status, must_change_password, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		`, userID, cleanEmail, pwHash, displayName, domain.UserStatusActive, req.MustChangePassword, now); err != nil {
+			_ = tx.Rollback()
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "ユーザー作成に失敗しました",
+			})
+			continue
+		}
+
+		for gID := range groupMap {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO group_members (id, group_id, user_id, created_at)
+				VALUES ($1, $2, $3, $4)
+				ON CONFLICT DO NOTHING
+			`, id.NewV7String(), gID, userID, now); err != nil {
+				_ = tx.Rollback()
+				result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+					Email:  rawEmail,
+					Reason: "グループ所属の設定に失敗しました",
+				})
+				continue
+			}
+		}
+
+		for perm := range permMap {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO system_permissions (id, subject_type, subject_id, permission, created_at)
+				VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT DO NOTHING
+			`, id.NewV7String(), domain.SubjectUser, userID, perm, now); err != nil {
+				_ = tx.Rollback()
+				result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+					Email:  rawEmail,
+					Reason: "権限の設定に失敗しました",
+				})
+				continue
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "トランザクションコミットに失敗しました",
+			})
+			continue
+		}
+
+		u, err := s.GetUserByID(ctx, userID)
+		if err != nil {
+			result.Failures = append(result.Failures, domain.BulkDirectUserFailure{
+				Email:  rawEmail,
+				Reason: "ユーザー情報の取得に失敗しました",
+			})
+			continue
+		}
+
+		result.CreatedUsers = append(result.CreatedUsers, domain.BulkDirectUserCredential{
+			User:         u,
+			TempPassword: tempPassword,
+		})
+	}
+
+	result.CreatedCount = len(result.CreatedUsers)
+	result.FailedCount = len(result.Failures)
+
+	return result, nil
+}
+
 
 // ResendInvite regenerates a 72h invitation token and resends the email.
 func (s *Store) ResendInvite(ctx context.Context, userID string) (string, error) {
@@ -774,7 +979,7 @@ func (s *Store) SetOrChangePassword(ctx context.Context, userID, currentPassword
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`, newHash, time.Now().UTC(), userID)
+	_, err = s.db.ExecContext(ctx, `UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = $2 WHERE id = $3`, newHash, time.Now().UTC(), userID)
 	return err
 }
 
@@ -840,7 +1045,7 @@ func (s *Store) ConfirmPasswordReset(ctx context.Context, rawToken, newPassword 
 	}
 
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`, newHash, now, userID); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = $2 WHERE id = $3`, newHash, now, userID); err != nil {
 		return err
 	}
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM email_verification_tokens WHERE id = $1`, tokenID)

@@ -29,6 +29,7 @@ export interface User {
   permissions?: SystemPermissionType[]
   mfa_enabled?: boolean
   mfa_enforced?: boolean
+  must_change_password?: boolean
   invite_url?: string
   created_at: string
   updated_at: string
@@ -448,6 +449,28 @@ export interface BulkInviteResult {
   invited_users: User[]
   failures: BulkInviteFailure[]
 }
+
+export interface BulkDirectUserItem {
+  email: string
+  display_name: string
+  password?: string
+}
+
+export interface BulkDirectUserCredential {
+  id: string
+  email: string
+  display_name: string
+  temp_password: string
+}
+
+export interface BulkDirectUserResult {
+  total: number
+  succeeded: number
+  failed: number
+  created_users: BulkDirectUserCredential[]
+  failures: { email: string; display_name: string; reason: string }[]
+}
+
 
 
 

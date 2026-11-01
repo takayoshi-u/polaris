@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     mfa_enforced BOOLEAN NOT NULL DEFAULT FALSE,
     totp_secret TEXT,
     mfa_backup_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -591,5 +591,115 @@ export function parseInvitationText(
   return results
 }
 
+export interface ParsedDirectUserRow {
+  email: string
+  displayName: string
+  password?: string
+  passwordMode: 'custom' | 'batch_default' | 'auto_generate'
+  domain: string
+  isDomainAllowed: boolean
+  isDuplicateInBatch: boolean
+  isAlreadyRegistered: boolean
+  isValidEmailFormat: boolean
+}
+
+export function parseDirectUserText(
+  text: string,
+  allowedDomains: string[] = [],
+  existingEmails: Set<string> = new Set(),
+  batchDefaultPassword = ''
+): ParsedDirectUserRow[] {
+  if (!text || !text.trim()) return []
+
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
+  if (lines.length === 0) return []
+
+  const results: ParsedDirectUserRow[] = []
+  const seenEmails = new Set<string>()
+
+  let startIndex = 0
+  const firstLine = lines[0].toLowerCase()
+  if (
+    firstLine.includes('email') ||
+    firstLine.includes('メール') ||
+    firstLine.startsWith('mail,') ||
+    firstLine.startsWith('address,')
+  ) {
+    startIndex = 1
+  }
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i]
+    let email = ''
+    let displayName = ''
+    let password = ''
+
+    let parts: string[] = []
+    if (line.includes('\t')) {
+      parts = line.split('\t')
+    } else if (line.includes(',')) {
+      parts = line.split(',')
+    } else if (line.includes(';')) {
+      parts = line.split(';')
+    } else {
+      parts = [line]
+    }
+
+    email = parts[0].trim().replace(/^["']|["']$/g, '')
+    if (parts.length > 1) {
+      displayName = parts[1].trim().replace(/^["']|["']$/g, '')
+    }
+    if (parts.length > 2) {
+      password = parts.slice(2).join(',').trim().replace(/^["']|["']$/g, '')
+    }
+
+    if (!email) continue
+
+    const lowerEmail = email.toLowerCase()
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const isValidFormat = emailRegex.test(lowerEmail)
+    const domain = lowerEmail.includes('@') ? lowerEmail.split('@')[1].trim() : ''
+
+    let isDomainAllowed = true
+    if (allowedDomains && allowedDomains.length > 0) {
+      isDomainAllowed = allowedDomains.some(d => {
+        const cleanD = d.toLowerCase().trim().replace(/^@/, '').replace(/^\./, '')
+        return domain === cleanD || domain.endsWith('.' + cleanD)
+      })
+    }
+
+    const isDuplicateInBatch = seenEmails.has(lowerEmail)
+    seenEmails.add(lowerEmail)
+
+    const isAlreadyRegistered = existingEmails.has(lowerEmail)
+
+    if (!displayName && domain) {
+      displayName = lowerEmail.split('@')[0]
+    }
+
+    let passwordMode: 'custom' | 'batch_default' | 'auto_generate' = 'auto_generate'
+    if (password) {
+      passwordMode = 'custom'
+    } else if (batchDefaultPassword.trim()) {
+      passwordMode = 'batch_default'
+    }
+
+    results.push({
+      email,
+      displayName,
+      password: password || undefined,
+      passwordMode,
+      domain,
+      isDomainAllowed,
+      isDuplicateInBatch,
+      isAlreadyRegistered,
+      isValidEmailFormat: isValidFormat
+    })
+  }
+
+  return results
+}
+
+
 
 

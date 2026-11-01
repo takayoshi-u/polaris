@@ -421,17 +421,22 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email       string   `json:"email"`
-		DisplayName string   `json:"display_name"`
-		Password    string   `json:"password"`
-		GroupIDs    []string `json:"group_ids"`
-		Permissions []string `json:"permissions"`
+		Email              string   `json:"email"`
+		DisplayName        string   `json:"display_name"`
+		Password           string   `json:"password"`
+		MustChangePassword *bool    `json:"must_change_password"`
+		GroupIDs           []string `json:"group_ids"`
+		Permissions        []string `json:"permissions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
-	u, err := s.store.CreateUserDirect(r.Context(), body.Email, body.DisplayName, body.Password, body.GroupIDs, body.Permissions)
+	mustChange := true
+	if body.MustChangePassword != nil {
+		mustChange = *body.MustChangePassword
+	}
+	u, err := s.store.CreateUserDirect(r.Context(), body.Email, body.DisplayName, body.Password, mustChange, body.GroupIDs, body.Permissions)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -470,6 +475,20 @@ func (s *Server) handleBulkInviteUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.store.BulkInviteUsers(r.Context(), body.Invitations, body.DefaultGroupIDs, body.DefaultPermissions)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleBulkCreateDirectUsers(w http.ResponseWriter, r *http.Request) {
+	var body domain.BulkDirectUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	result, err := s.store.BulkCreateDirectUsers(r.Context(), body)
 	if err != nil {
 		writeError(w, err)
 		return

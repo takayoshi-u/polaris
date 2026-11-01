@@ -113,6 +113,7 @@ type User struct {
 	Permissions []string  `json:"permissions,omitempty"`
 	MFAEnabled  bool      `json:"mfa_enabled"`
 	MFAEnforced bool      `json:"mfa_enforced"`
+	MustChangePassword bool `json:"must_change_password"`
 	InviteURL   string    `json:"invite_url,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -566,6 +567,40 @@ type BulkInviteResult struct {
 	FailedCount  int                 `json:"failed_count"`
 	InvitedUsers []*User             `json:"invited_users"`
 	Failures     []BulkInviteFailure `json:"failures"`
+}
+
+type BulkDirectUserItem struct {
+	Email       string   `json:"email"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Password    string   `json:"password,omitempty"`
+	GroupIDs    []string `json:"group_ids,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+}
+
+type BulkDirectUserRequest struct {
+	Users              []BulkDirectUserItem `json:"users"`
+	DefaultPassword    string               `json:"default_password,omitempty"`
+	MustChangePassword bool                 `json:"must_change_password"`
+	DefaultGroupIDs    []string             `json:"default_group_ids,omitempty"`
+	DefaultPermissions []string             `json:"default_permissions,omitempty"`
+}
+
+type BulkDirectUserCredential struct {
+	User         *User  `json:"user"`
+	TempPassword string `json:"temp_password"`
+}
+
+type BulkDirectUserFailure struct {
+	Email  string `json:"email"`
+	Reason string `json:"reason"`
+}
+
+type BulkDirectUserResult struct {
+	Total        int                        `json:"total"`
+	CreatedCount int                        `json:"created_count"`
+	FailedCount  int                        `json:"failed_count"`
+	CreatedUsers []BulkDirectUserCredential `json:"created_users"`
+	Failures     []BulkDirectUserFailure    `json:"failures"`
 }
 
 // MFA & WebAuthn Models

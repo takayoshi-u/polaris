@@ -169,12 +169,12 @@ func (s *guardMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		// GetUserByID
 		userID := fmt.Sprintf("%v", args[0])
 		u, exists := st.users[userID]
-		cols := []string{"id", "email", "password_hash", "google_sub", "display_name", "avatar_url", "status", "mfa_enabled", "mfa_enforced", "created_at", "updated_at"}
+		cols := []string{"id", "email", "password_hash", "google_sub", "display_name", "avatar_url", "status", "mfa_enabled", "mfa_enforced", "must_change_password", "created_at", "updated_at"}
 		if !exists || u == nil {
 			return &mockRows{cols: cols, rows: nil}, nil
 		}
 		values := [][]driver.Value{{
-			u.ID, u.Email, "hashed-pass", nil, u.DisplayName, u.AvatarURL, u.Status, u.MFAEnabled, u.MFAEnforced, u.CreatedAt, u.UpdatedAt,
+			u.ID, u.Email, "hashed-pass", nil, u.DisplayName, u.AvatarURL, u.Status, u.MFAEnabled, u.MFAEnforced, false, u.CreatedAt, u.UpdatedAt,
 		}}
 		return &mockRows{cols: cols, rows: values}, nil
 

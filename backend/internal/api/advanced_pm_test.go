@@ -300,6 +300,14 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("failed to assign task to sprint (%d): %s", rec.Code, rec.Body.String())
 	}
+	var assignedTask domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&assignedTask)
+	if assignedTask.SprintID == nil || *assignedTask.SprintID != sp.ID {
+		t.Fatalf("expected task sprint_id %s, got %v", sp.ID, assignedTask.SprintID)
+	}
+	if assignedTask.StoryPoints == nil || *assignedTask.StoryPoints != pts {
+		t.Fatalf("expected task story_points %f, got %v", pts, assignedTask.StoryPoints)
+	}
 
 	// Burndown
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sprints/%s/burndown", sp.ID), nil)
@@ -646,4 +654,198 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	}
 
 	_ = ctx
+}
+
+func TestTask_SprintAndStoryPointsRoundTrip(t *testing.T) {
+	rig := setupTestRig(t)
+	defer rig.db.Close()
+
+	srv := rig.srv
+	cookie := rig.adminCookie
+
+	// 1. Create a Project
+	projBody, _ := json.Marshal(map[string]any{
+		"key":           "RND",
+		"name":          "RoundTrip PM Project",
+		"description":   "Project for round-trip testing",
+		"hours_per_day": 8.0,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(projBody))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create project (%d): %s", rec.Code, rec.Body.String())
+	}
+	var proj domain.Project
+	_ = json.NewDecoder(rec.Body).Decode(&proj)
+
+	// Fetch default status
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/statuses", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var statuses []domain.Status
+	_ = json.NewDecoder(rec.Body).Decode(&statuses)
+	defaultStatusID := statuses[0].ID
+
+	// 2. Create Issue
+	issueBody, _ := json.Marshal(map[string]any{
+		"title": "RoundTrip Issue",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/issues", proj.ID), bytes.NewReader(issueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create issue (%d): %s", rec.Code, rec.Body.String())
+	}
+	var issue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&issue)
+
+	// 3. Create two Sprints: sp1 and sp2
+	sp1Body, _ := json.Marshal(map[string]any{
+		"name":   "Sprint A",
+		"status": "planned",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/sprints", proj.ID), bytes.NewReader(sp1Body))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create sprint 1 (%d): %s", rec.Code, rec.Body.String())
+	}
+	var sp1 domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&sp1)
+
+	sp2Body, _ := json.Marshal(map[string]any{
+		"name":   "Sprint B",
+		"status": "planned",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/sprints", proj.ID), bytes.NewReader(sp2Body))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create sprint 2 (%d): %s", rec.Code, rec.Body.String())
+	}
+	var sp2 domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&sp2)
+
+	// a. Create task with story_points & sprint_id -> assert values
+	createPts := 3.5
+	createTaskBody, _ := json.Marshal(map[string]any{
+		"issue_id":     issue.ID,
+		"status_id":    defaultStatusID,
+		"title":        "Task with Sprint & SP",
+		"sprint_id":    sp1.ID,
+		"story_points": createPts,
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", proj.ID), bytes.NewReader(createTaskBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create task (%d): %s", rec.Code, rec.Body.String())
+	}
+	var createdTask domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&createdTask)
+	if createdTask.SprintID == nil || *createdTask.SprintID != sp1.ID {
+		t.Fatalf("expected task sprint_id %s, got %v", sp1.ID, createdTask.SprintID)
+	}
+	if createdTask.StoryPoints == nil || *createdTask.StoryPoints != createPts {
+		t.Fatalf("expected task story_points %f, got %v", createPts, createdTask.StoryPoints)
+	}
+
+	// Verify persistence via GET
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks/%s", proj.ID, createdTask.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to get task (%d): %s", rec.Code, rec.Body.String())
+	}
+	var getTask domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&getTask)
+	if getTask.SprintID == nil || *getTask.SprintID != sp1.ID {
+		t.Fatalf("expected persisted task sprint_id %s, got %v", sp1.ID, getTask.SprintID)
+	}
+	if getTask.StoryPoints == nil || *getTask.StoryPoints != createPts {
+		t.Fatalf("expected persisted task story_points %f, got %v", createPts, getTask.StoryPoints)
+	}
+
+	// b. Update task with new story_points & sprint_id -> assert values
+	newPts := 8.0
+	updateTaskBody, _ := json.Marshal(map[string]any{
+		"sprint_id":    sp2.ID,
+		"story_points": newPts,
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/tasks/%s", createdTask.ID), bytes.NewReader(updateTaskBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to update task (%d): %s", rec.Code, rec.Body.String())
+	}
+	var updatedTask domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&updatedTask)
+	if updatedTask.SprintID == nil || *updatedTask.SprintID != sp2.ID {
+		t.Fatalf("expected updated task sprint_id %s, got %v", sp2.ID, updatedTask.SprintID)
+	}
+	if updatedTask.StoryPoints == nil || *updatedTask.StoryPoints != newPts {
+		t.Fatalf("expected updated task story_points %f, got %v", newPts, updatedTask.StoryPoints)
+	}
+
+	// Verify update persistence via GET
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks/%s", proj.ID, createdTask.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to get updated task (%d): %s", rec.Code, rec.Body.String())
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&getTask)
+	if getTask.SprintID == nil || *getTask.SprintID != sp2.ID {
+		t.Fatalf("expected persisted updated task sprint_id %s, got %v", sp2.ID, getTask.SprintID)
+	}
+	if getTask.StoryPoints == nil || *getTask.StoryPoints != newPts {
+		t.Fatalf("expected persisted updated task story_points %f, got %v", newPts, getTask.StoryPoints)
+	}
+
+	// c. Update task with null story_points & null sprint_id -> assert cleared to nil
+	clearTaskBody, _ := json.Marshal(map[string]any{
+		"sprint_id":    nil,
+		"story_points": nil,
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/tasks/%s", createdTask.ID), bytes.NewReader(clearTaskBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to clear task sprint and sp (%d): %s", rec.Code, rec.Body.String())
+	}
+	var clearedTask domain.Task
+	_ = json.NewDecoder(rec.Body).Decode(&clearedTask)
+	if clearedTask.SprintID != nil {
+		t.Fatalf("expected cleared task sprint_id to be nil, got %v", *clearedTask.SprintID)
+	}
+	if clearedTask.StoryPoints != nil {
+		t.Fatalf("expected cleared task story_points to be nil, got %v", *clearedTask.StoryPoints)
+	}
+
+	// Verify clear persistence via GET
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks/%s", proj.ID, createdTask.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to get cleared task (%d): %s", rec.Code, rec.Body.String())
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&getTask)
+	if getTask.SprintID != nil {
+		t.Fatalf("expected persisted cleared task sprint_id to be nil, got %v", *getTask.SprintID)
+	}
+	if getTask.StoryPoints != nil {
+		t.Fatalf("expected persisted cleared task story_points to be nil, got %v", *getTask.StoryPoints)
+	}
 }

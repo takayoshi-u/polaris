@@ -236,13 +236,20 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	}
 	var sp domain.Sprint
 	_ = json.NewDecoder(rec.Body).Decode(&sp)
+	if sp.StartDate == nil || *sp.StartDate != spStart {
+		t.Fatalf("expected sprint start_date %s, got %v", spStart, sp.StartDate)
+	}
+	if sp.EndDate == nil || *sp.EndDate != spEnd {
+		t.Fatalf("expected sprint end_date %s, got %v", spEnd, sp.EndDate)
+	}
 
 	// Update sprint to active
+	newSpEnd := time.Now().AddDate(0, 0, 21).Format("2006-01-02")
 	upSpBody, _ := json.Marshal(map[string]any{
 		"name":       "Sprint 1 (Active)",
 		"goal":       "Ship MVP Now",
 		"start_date": spStart,
-		"end_date":   spEnd,
+		"end_date":   newSpEnd,
 		"status":     "active",
 	})
 	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/sprints/%s", sp.ID), bytes.NewReader(upSpBody))
@@ -251,6 +258,31 @@ func TestAdvancedPM_FullIntegration(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("failed to update sprint (%d): %s", rec.Code, rec.Body.String())
+	}
+	var updatedSp domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&updatedSp)
+	if updatedSp.StartDate == nil || *updatedSp.StartDate != spStart {
+		t.Fatalf("expected updated sprint start_date %s, got %v", spStart, updatedSp.StartDate)
+	}
+	if updatedSp.EndDate == nil || *updatedSp.EndDate != newSpEnd {
+		t.Fatalf("expected updated sprint end_date %s, got %v", newSpEnd, updatedSp.EndDate)
+	}
+
+	// Verify updated dates are persisted via GET
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sprints/%s", sp.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to get updated sprint (%d): %s", rec.Code, rec.Body.String())
+	}
+	var fetchedSp domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&fetchedSp)
+	if fetchedSp.StartDate == nil || *fetchedSp.StartDate != spStart {
+		t.Fatalf("expected persisted sprint start_date %s, got %v", spStart, fetchedSp.StartDate)
+	}
+	if fetchedSp.EndDate == nil || *fetchedSp.EndDate != newSpEnd {
+		t.Fatalf("expected persisted sprint end_date %s, got %v", newSpEnd, fetchedSp.EndDate)
 	}
 
 	// Assign task to sprint with story points

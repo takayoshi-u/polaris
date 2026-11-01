@@ -1239,6 +1239,8 @@ type CreateIssueRequest struct {
 	TypeID            *string                    `json:"type_id"`
 	Title             string                     `json:"title"`
 	Description       string                     `json:"description"`
+	Premortem         string                     `json:"premortem"`
+	Postmortem        string                     `json:"postmortem"`
 	LabelIDs          []string                   `json:"label_ids"`
 	CustomValues      map[string]json.RawMessage `json:"custom_values"`
 	CreateInitialTask bool                       `json:"create_initial_task"`
@@ -1250,6 +1252,8 @@ type UpdateIssueRequest struct {
 	State        *string                    `json:"state"`
 	Title        *string                    `json:"title"`
 	Description  *string                    `json:"description"`
+	Premortem    *string                    `json:"premortem"`
+	Postmortem   *string                    `json:"postmortem"`
 	LabelIDs     *[]string                  `json:"label_ids"`
 	CustomValues map[string]json.RawMessage `json:"custom_values"`
 	DisplayOrder *int                       `json:"display_order"`
@@ -1319,6 +1323,7 @@ func (s *Server) handleListIssues(w http.ResponseWriter, r *http.Request) {
 		AssigneeID: q.Get("assignee_id"),
 		StatusID:   q.Get("status_id"),
 		TypeID:     q.Get("type_id"),
+		SprintID:   q.Get("sprint_id"),
 		IssueState: issueState,
 		Keyword:    q.Get("keyword"),
 	}
@@ -1341,6 +1346,8 @@ func (s *Server) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
 		TypeID:            body.TypeID,
 		Title:             body.Title,
 		Description:       body.Description,
+		Premortem:         body.Premortem,
+		Postmortem:        body.Postmortem,
 		LabelIDs:          body.LabelIDs,
 		CustomValues:      body.CustomValues,
 		CreateInitialTask: body.CreateInitialTask,
@@ -1385,6 +1392,8 @@ func (s *Server) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 		State:        body.State,
 		Title:        body.Title,
 		Description:  body.Description,
+		Premortem:    body.Premortem,
+		Postmortem:   body.Postmortem,
 		LabelIDs:     body.LabelIDs,
 		CustomValues: body.CustomValues,
 		DisplayOrder: body.DisplayOrder,

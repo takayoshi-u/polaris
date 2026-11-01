@@ -204,6 +204,8 @@ export interface IssueRollup {
   total_actual_hours: number
   total_planned_cost: number
   total_actual_cost: number
+  total_story_points?: number
+  completed_story_points?: number
   weighted_progress: number
   assignees: SubjectRef[]
   task_count: number
@@ -251,6 +253,8 @@ export interface Issue {
   state: 'open' | 'closed'
   title: string
   description?: string | null
+  premortem?: string | null
+  postmortem?: string | null
   label_ids: string[]
   custom_values: Record<string, any>
   field_permissions: Record<string, FieldPermissionState>
@@ -355,7 +359,9 @@ export interface Sprint {
   end_date?: string | null
   status: 'planned' | 'active' | 'closed'
   task_count?: number
+  completed_task_count?: number
   total_story_points?: number
+  completed_story_points?: number
   total_planned_hours?: number
   total_actual_hours?: number
   created_at: string

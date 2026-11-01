@@ -424,6 +424,12 @@ components:
           type: number
           multipleOf: 0.01
           description: 配下タスクの実績コスト合計（小数点第2位まで）
+        total_story_points:
+          type: number
+          description: 配下タスクのストーリーポイント（SP）合計（計画値）
+        completed_story_points:
+          type: number
+          description: 配下タスクのうち完了ステータスのタスクの SP 合計
         weighted_progress:
           type: number
         assignees:
@@ -578,6 +584,12 @@ components:
         description:
           type: string
           nullable: true
+        premortem:
+          type: string
+          description: プレモーテム（事前リスク予測・予防策）。Markdown。未入力時は空文字
+        postmortem:
+          type: string
+          description: ポストモーテム（事後検証・振り返り）。Markdown。未入力時は空文字
         label_ids:
           type: array
           items:
@@ -859,8 +871,15 @@ components:
           enum: [planned, active, closed]
         task_count:
           type: integer
+        completed_task_count:
+          type: integer
+          description: スプリント配下のタスクのうち完了ステータスのタスク数
         total_story_points:
           type: number
+          description: スプリント配下の全タスクの SP 合計（計画 SP）
+        completed_story_points:
+          type: number
+          description: スプリント配下の完了ステータスのタスクの SP 合計（消化 SP。クローズ済みスプリントでは確定ベロシティ）
         total_planned_hours:
           type: number
         total_actual_hours:
@@ -2060,6 +2079,12 @@ paths:
         - in: query
           name: keyword
           schema: { type: string }
+        - in: query
+          name: sprint_id
+          description: |
+            所属スプリントでの絞り込み（配下タスクの `sprint_id` に対する条件）。
+            スプリントID（UUID）、`active`（アクティブスプリント。存在しない場合は該当なし）、`unassigned`（未割当バックログ）のいずれか。
+          schema: { type: string, example: active }
       responses:
         '200':
           description: 課題一覧
@@ -2076,6 +2101,22 @@ paths:
           name: projectId
           required: true
           schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                template_id: { type: string, format: uuid, nullable: true }
+                type_id: { type: string, format: uuid, nullable: true }
+                title: { type: string }
+                description: { type: string }
+                premortem: { type: string, description: プレモーテム（事前リスク予測）。省略時は空文字 }
+                postmortem: { type: string, description: ポストモーテム（事後振り返り）。省略時は空文字 }
+                label_ids: { type: array, items: { type: string, format: uuid } }
+                custom_values: { type: object, additionalProperties: true }
+                create_initial_task: { type: boolean }
       responses:
         '201':
           description: 作成完了

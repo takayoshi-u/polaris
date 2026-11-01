@@ -212,32 +212,46 @@ func (s *Store) ListSprints(ctx context.Context, projectID string) ([]domain.Spr
 	}
 
 	// Calculate aggregate task metrics for each sprint
+	doneStatusIDs := s.getProjectDoneStatusIDs(ctx, projectID)
 	statRows, err := s.db.QueryContext(ctx, `
-		SELECT sprint_id, COUNT(*), COALESCE(SUM(story_points), 0), COALESCE(SUM(planned_hours), 0), COALESCE(SUM(actual_hours), 0)
+		SELECT sprint_id, status_id, progress, COALESCE(story_points, 0), COALESCE(planned_hours, 0), COALESCE(actual_hours, 0)
 		FROM tasks
 		WHERE project_id = $1 AND sprint_id IS NOT NULL
-		GROUP BY sprint_id
 	`, projectID)
 	if err == nil {
 		defer statRows.Close()
 		type stats struct {
-			count int
-			sp    float64
-			pHrs  float64
-			aHrs  float64
+			count     int
+			compCount int
+			sp        float64
+			compSP    float64
+			pHrs      float64
+			aHrs      float64
 		}
 		sm := make(map[string]stats)
 		for statRows.Next() {
-			var sid string
-			var st stats
-			if err := statRows.Scan(&sid, &st.count, &st.sp, &st.pHrs, &st.aHrs); err == nil {
+			var sid, statusID string
+			var progress int
+			var sp, pHrs, aHrs float64
+			if err := statRows.Scan(&sid, &statusID, &progress, &sp, &pHrs, &aHrs); err == nil {
+				st := sm[sid]
+				st.count++
+				st.sp += sp
+				st.pHrs += pHrs
+				st.aHrs += aHrs
+				if progress >= 100 || doneStatusIDs[statusID] {
+					st.compCount++
+					st.compSP += sp
+				}
 				sm[sid] = st
 			}
 		}
 		for i := range sprints {
 			if st, ok := sm[sprints[i].ID]; ok {
 				sprints[i].TaskCount = st.count
+				sprints[i].CompletedTaskCount = st.compCount
 				sprints[i].TotalStoryPoints = st.sp
+				sprints[i].CompletedStoryPoints = st.compSP
 				sprints[i].TotalPlannedHours = st.pHrs
 				sprints[i].TotalActualHours = st.aHrs
 			}
@@ -331,10 +345,29 @@ func (s *Store) GetSprint(ctx context.Context, sprintID, actorUserID string) (*d
 		return nil, ErrForbidden
 	}
 
-	_ = s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(story_points), 0), COALESCE(SUM(planned_hours), 0), COALESCE(SUM(actual_hours), 0)
+	doneStatusIDs := s.getProjectDoneStatusIDs(ctx, sp.ProjectID)
+	tRows, err := s.db.QueryContext(ctx, `
+		SELECT status_id, progress, COALESCE(story_points, 0), COALESCE(planned_hours, 0), COALESCE(actual_hours, 0)
 		FROM tasks WHERE sprint_id = $1
-	`, sprintID).Scan(&sp.TaskCount, &sp.TotalStoryPoints, &sp.TotalPlannedHours, &sp.TotalActualHours)
+	`, sprintID)
+	if err == nil {
+		defer tRows.Close()
+		for tRows.Next() {
+			var statusID string
+			var progress int
+			var spVal, pHrs, aHrs float64
+			if err := tRows.Scan(&statusID, &progress, &spVal, &pHrs, &aHrs); err == nil {
+				sp.TaskCount++
+				sp.TotalStoryPoints += spVal
+				sp.TotalPlannedHours += pHrs
+				sp.TotalActualHours += aHrs
+				if progress >= 100 || doneStatusIDs[statusID] {
+					sp.CompletedTaskCount++
+					sp.CompletedStoryPoints += spVal
+				}
+			}
+		}
+	}
 
 	return &sp, nil
 }
@@ -447,14 +480,16 @@ func (s *Store) GetSprintBurndown(ctx context.Context, sprintID, actorUserID str
 	}
 
 	// Fetch tasks in sprint
+	doneStatusIDs := s.getProjectDoneStatusIDs(ctx, sp.ProjectID)
 	type taskInfo struct {
 		sp       float64
 		pHours   float64
 		progress int
+		isDone   bool
 		endVal   *string
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT COALESCE(story_points, 0), COALESCE(planned_hours, 0), progress, actual_end_date
+		SELECT status_id, COALESCE(story_points, 0), COALESCE(planned_hours, 0), progress, actual_end_date
 		FROM tasks WHERE sprint_id = $1
 	`, sprintID)
 	if err != nil {
@@ -466,12 +501,14 @@ func (s *Store) GetSprintBurndown(ctx context.Context, sprintID, actorUserID str
 	var totalSP, totalHours float64
 	for rows.Next() {
 		var ti taskInfo
+		var statusID string
 		var aEnd sql.NullTime
-		if err := rows.Scan(&ti.sp, &ti.pHours, &ti.progress, &aEnd); err == nil {
+		if err := rows.Scan(&statusID, &ti.sp, &ti.pHours, &ti.progress, &aEnd); err == nil {
 			if aEnd.Valid {
 				v := aEnd.Time.Format("2006-01-02")
 				ti.endVal = &v
 			}
+			ti.isDone = ti.progress >= 100 || doneStatusIDs[statusID]
 			totalSP += ti.sp
 			totalHours += ti.pHours
 			tasks = append(tasks, ti)
@@ -493,7 +530,7 @@ func (s *Store) GetSprintBurndown(ctx context.Context, sprintID, actorUserID str
 		// Calculate completed SP & hours on or before this day
 		var completedSP, completedHours float64
 		for _, t := range tasks {
-			if t.progress == 100 {
+			if t.isDone {
 				if t.endVal != nil && *t.endVal <= dateStr {
 					completedSP += t.sp
 					completedHours += t.pHours

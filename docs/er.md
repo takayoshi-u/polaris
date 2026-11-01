@@ -226,6 +226,8 @@ erDiagram
         varchar state "open / closed"
         varchar title
         text description "Markdown"
+        text premortem "プレモーテム(事前リスク予測) Markdown / NOT NULL DEFAULT ''"
+        text postmortem "ポストモーテム(事後振り返り) Markdown / NOT NULL DEFAULT ''"
         integer display_order
         timestamptz created_at
         timestamptz updated_at

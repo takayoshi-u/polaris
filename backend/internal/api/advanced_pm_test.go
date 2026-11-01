@@ -849,3 +849,202 @@ func TestTask_SprintAndStoryPointsRoundTrip(t *testing.T) {
 		t.Fatalf("expected persisted cleared task story_points to be nil, got %v", *getTask.StoryPoints)
 	}
 }
+
+func TestAgileEnhancements_PremortemPostmortemAndSprintFilter(t *testing.T) {
+	rig := setupTestRig(t)
+	defer rig.db.Close()
+
+	srv := rig.srv
+	cookie := rig.adminCookie
+
+	// 1. Create Project
+	projBody, _ := json.Marshal(map[string]any{
+		"name":          "Agile Enhancements Project",
+		"description":   "Testing premortem/postmortem, sprint filters, and story point rollups",
+		"hours_per_day": 8.0,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(projBody))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create project (%d): %s", rec.Code, rec.Body.String())
+	}
+	var proj domain.Project
+	_ = json.NewDecoder(rec.Body).Decode(&proj)
+
+	// Fetch statuses (first = todo, last = done)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/statuses", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var statuses []domain.Status
+	_ = json.NewDecoder(rec.Body).Decode(&statuses)
+	if len(statuses) < 2 {
+		t.Fatalf("expected at least 2 statuses, got %d", len(statuses))
+	}
+	todoStatusID := statuses[0].ID
+	doneStatusID := statuses[len(statuses)-1].ID
+
+	// 2. Issue Premortem & Postmortem Round-Trip (Create -> Get -> Update -> Clear)
+	createIssueBody, _ := json.Marshal(map[string]any{
+		"title":       "Incident Prevention Epic",
+		"description": "Epic description",
+		"premortem":   "Risk: DB connection pool exhaustion",
+		"postmortem":  "Initial postmortem note",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/issues", proj.ID), bytes.NewReader(createIssueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("failed to create issue (%d): %s", rec.Code, rec.Body.String())
+	}
+	var createdIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&createdIssue)
+	if createdIssue.Premortem != "Risk: DB connection pool exhaustion" {
+		t.Fatalf("expected premortem set on create, got %q", createdIssue.Premortem)
+	}
+	if createdIssue.Postmortem != "Initial postmortem note" {
+		t.Fatalf("expected postmortem set on create, got %q", createdIssue.Postmortem)
+	}
+
+	// Verify GET persistence
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var fetchedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&fetchedIssue)
+	if fetchedIssue.Premortem != "Risk: DB connection pool exhaustion" || fetchedIssue.Postmortem != "Initial postmortem note" {
+		t.Fatalf("expected persisted premortem/postmortem, got %q / %q", fetchedIssue.Premortem, fetchedIssue.Postmortem)
+	}
+
+	// Update premortem & postmortem
+	updateIssueBody, _ := json.Marshal(map[string]any{
+		"premortem":  "Updated Risk: Cache stampede",
+		"postmortem": "Resolved with singleflight",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), bytes.NewReader(updateIssueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to update issue (%d): %s", rec.Code, rec.Body.String())
+	}
+	var updatedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&updatedIssue)
+	if updatedIssue.Premortem != "Updated Risk: Cache stampede" || updatedIssue.Postmortem != "Resolved with singleflight" {
+		t.Fatalf("expected updated premortem/postmortem, got %q / %q", updatedIssue.Premortem, updatedIssue.Postmortem)
+	}
+
+	// Clear premortem & postmortem with empty string
+	clearIssueBody, _ := json.Marshal(map[string]any{
+		"premortem":  "",
+		"postmortem": "",
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), bytes.NewReader(clearIssueBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to clear issue premortem/postmortem (%d): %s", rec.Code, rec.Body.String())
+	}
+	var clearedIssue domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&clearedIssue)
+	if clearedIssue.Premortem != "" || clearedIssue.Postmortem != "" {
+		t.Fatalf("expected cleared premortem/postmortem, got %q / %q", clearedIssue.Premortem, clearedIssue.Postmortem)
+	}
+
+	// 3. Create Active Sprint & Planned Sprint
+	spActiveBody, _ := json.Marshal(map[string]any{
+		"name":   "Active Sprint 1",
+		"status": "active",
+	})
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/sprints", proj.ID), bytes.NewReader(spActiveBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var activeSprint domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&activeSprint)
+
+	// 4. Create 3 Tasks:
+	// - Task A: in activeSprint, SP=3, progress=100 (todo status) -> completed via progress
+	// - Task B: in activeSprint, SP=5, progress=20 (done status) -> completed via Done status
+	// - Task C: unassigned sprint, SP=2, progress=0 (todo status) -> not completed
+	for _, tc := range []map[string]any{
+		{"issue_id": createdIssue.ID, "title": "Task A", "status_id": todoStatusID, "sprint_id": activeSprint.ID, "story_points": 3.0, "progress": 100},
+		{"issue_id": createdIssue.ID, "title": "Task B", "status_id": doneStatusID, "sprint_id": activeSprint.ID, "story_points": 5.0, "progress": 20},
+		{"issue_id": createdIssue.ID, "title": "Task C", "status_id": todoStatusID, "story_points": 2.0, "progress": 0},
+	} {
+		b, _ := json.Marshal(tc)
+		req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", proj.ID), bytes.NewReader(b))
+		req.AddCookie(cookie)
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("failed to create task (%d): %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// 5. Verify Issue Rollup SP
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues/%s", proj.ID, createdIssue.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	_ = json.NewDecoder(rec.Body).Decode(&fetchedIssue)
+	if fetchedIssue.Rollup.TotalStoryPoints != 10.0 {
+		t.Fatalf("expected issue TotalStoryPoints 10.0, got %v", fetchedIssue.Rollup.TotalStoryPoints)
+	}
+	if fetchedIssue.Rollup.CompletedStoryPoints != 8.0 {
+		t.Fatalf("expected issue CompletedStoryPoints 8.0, got %v", fetchedIssue.Rollup.CompletedStoryPoints)
+	}
+
+	// 6. Verify Sprint CompletedTaskCount & CompletedStoryPoints in GET & List
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sprints/%s", activeSprint.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var gotSprint domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&gotSprint)
+	if gotSprint.TaskCount != 2 || gotSprint.CompletedTaskCount != 2 {
+		t.Fatalf("expected sprint TaskCount=2, CompletedTaskCount=2, got %d / %d", gotSprint.TaskCount, gotSprint.CompletedTaskCount)
+	}
+	if gotSprint.TotalStoryPoints != 8.0 || gotSprint.CompletedStoryPoints != 8.0 {
+		t.Fatalf("expected sprint TotalStoryPoints=8.0, CompletedStoryPoints=8.0, got %v / %v", gotSprint.TotalStoryPoints, gotSprint.CompletedStoryPoints)
+	}
+
+	// 7. Verify GET /projects/{id}/issues?sprint_id=... filters
+	// 7a: sprint_id=unassigned -> only Task C
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=unassigned", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var unassignedIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&unassignedIssues)
+	if len(unassignedIssues) != 1 || len(unassignedIssues[0].Tasks) != 1 || unassignedIssues[0].Tasks[0].Title != "Task C" {
+		t.Fatalf("expected 1 issue with Task C for sprint_id=unassigned, got %+v", unassignedIssues)
+	}
+
+	// 7b: sprint_id=active -> Task A & Task B
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=active", proj.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var activeIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&activeIssues)
+	if len(activeIssues) != 1 || len(activeIssues[0].Tasks) != 2 {
+		t.Fatalf("expected 1 issue with 2 tasks for sprint_id=active, got %+v", activeIssues)
+	}
+
+	// 7c: sprint_id=<UUID> -> Task A & Task B
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/issues?sprint_id=%s", proj.ID, activeSprint.ID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var uuidIssues []domain.Issue
+	_ = json.NewDecoder(rec.Body).Decode(&uuidIssues)
+	if len(uuidIssues) != 1 || len(uuidIssues[0].Tasks) != 2 {
+		t.Fatalf("expected 1 issue with 2 tasks for sprint_id=%s, got %+v", activeSprint.ID, uuidIssues)
+	}
+}

@@ -293,6 +293,27 @@ func TestCalculateIssueRollup(t *testing.T) {
 	if len(rollup.Assignees) != 3 {
 		t.Fatalf("expected 3 deduplicated assignees (u1, g1, u2), got %d", len(rollup.Assignees))
 	}
+
+	// Test StoryPoints rollup (progress=100 vs Done status)
+	sp1 := 3.0
+	sp2 := 5.0
+	sp3 := 2.0
+	tasksWithSP := []domain.Task{
+		{ID: "t1", StatusID: "st-todo", Progress: 100, StoryPoints: &sp1},
+		{ID: "t2", StatusID: "st-done", Progress: 50, StoryPoints: &sp2},
+		{ID: "t3", StatusID: "st-todo", Progress: 20, StoryPoints: &sp3},
+	}
+	rollupSP := domain.CalculateIssueRollup(tasksWithSP, 8.0, map[string]bool{"st-done": true})
+	if rollupSP.TotalStoryPoints != 10.0 {
+		t.Fatalf("expected TotalStoryPoints 10.0, got %v", rollupSP.TotalStoryPoints)
+	}
+	if rollupSP.CompletedStoryPoints != 8.0 {
+		t.Fatalf("expected CompletedStoryPoints 8.0 (t1 via progress=100 + t2 via Done status), got %v", rollupSP.CompletedStoryPoints)
+	}
+
+	if !domain.IsDoneStatusName("完了") || !domain.IsDoneStatusName("Done") || !domain.IsDoneStatusName("Closed") || domain.IsDoneStatusName("In Progress") {
+		t.Fatalf("unexpected IsDoneStatusName result")
+	}
 }
 
 func TestValidateHoursPrecision(t *testing.T) {

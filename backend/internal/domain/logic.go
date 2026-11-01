@@ -305,8 +305,14 @@ func ValidateTaskCost(v *float64, fieldName string) error {
 	return nil
 }
 
-// CalculateIssueRollup computes the aggregated dates, hours, weighted average progress, and deduplicated assignees for an Issue.
-func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
+// IsDoneStatusName returns true if the status name indicates completion ("完了", "done", or "close").
+func IsDoneStatusName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return strings.Contains(lower, "完了") || strings.Contains(lower, "done") || strings.Contains(lower, "close")
+}
+
+// CalculateIssueRollup computes the aggregated dates, hours, story points, weighted average progress, and deduplicated assignees for an Issue.
+func CalculateIssueRollup(tasks []Task, hoursPerDay float64, doneStatusIDs ...map[string]bool) IssueRollup {
 	if hoursPerDay < 1.0 || hoursPerDay > 24.0 {
 		hoursPerDay = 8.0
 	}
@@ -316,6 +322,11 @@ func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
 	}
 	if len(tasks) == 0 {
 		return rollup
+	}
+
+	var doneSet map[string]bool
+	if len(doneStatusIDs) > 0 && doneStatusIDs[0] != nil {
+		doneSet = doneStatusIDs[0]
 	}
 
 	var minPlanStart, maxPlanEnd *string
@@ -362,6 +373,13 @@ func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
 		if t.ActualCost != nil {
 			rollup.TotalActualCost += *t.ActualCost
 		}
+		if t.StoryPoints != nil {
+			rollup.TotalStoryPoints += *t.StoryPoints
+			isDone := t.Progress >= 100 || (doneSet != nil && doneSet[t.StatusID])
+			if isDone {
+				rollup.CompletedStoryPoints += *t.StoryPoints
+			}
+		}
 
 		// Determine weight for weighted progress calculation
 		weight := 0.0
@@ -399,6 +417,8 @@ func CalculateIssueRollup(tasks []Task, hoursPerDay float64) IssueRollup {
 	rollup.TotalActualHours = math.Round(rollup.TotalActualHours*100) / 100
 	rollup.TotalPlannedCost = math.Round(rollup.TotalPlannedCost*100) / 100
 	rollup.TotalActualCost = math.Round(rollup.TotalActualCost*100) / 100
+	rollup.TotalStoryPoints = math.Round(rollup.TotalStoryPoints*100) / 100
+	rollup.CompletedStoryPoints = math.Round(rollup.CompletedStoryPoints*100) / 100
 	if totalWeight > 0 {
 		rollup.WeightedProgress = math.Round((weightedProgressSum/totalWeight)*10) / 10
 	}

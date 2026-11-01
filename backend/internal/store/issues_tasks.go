@@ -18,6 +18,8 @@ type IssueCreateInput struct {
 	TypeID            *string
 	Title             string
 	Description       string
+	Premortem         string
+	Postmortem        string
 	LabelIDs          []string
 	CustomValues      map[string]json.RawMessage
 	CreateInitialTask bool
@@ -30,6 +32,8 @@ type IssueUpdateInput struct {
 	State        *string
 	Title        *string
 	Description  *string
+	Premortem    *string
+	Postmortem   *string
 	LabelIDs     *[]string
 	CustomValues map[string]json.RawMessage
 	DisplayOrder *int
@@ -95,8 +99,34 @@ type IssueTaskFilter struct {
 	AssigneeID string
 	StatusID   string
 	TypeID     string
+	SprintID   string
 	IssueState string // "open" (default), "closed", "all"
 	Keyword    string
+}
+
+func (s *Store) getProjectDoneStatusIDs(ctx context.Context, projectID string) map[string]bool {
+	doneIDs := make(map[string]bool)
+	statuses, err := s.ListStatuses(ctx, &projectID)
+	if err != nil || len(statuses) == 0 {
+		return doneIDs
+	}
+	maxOrder := -1
+	for _, st := range statuses {
+		if domain.IsDoneStatusName(st.Name) {
+			doneIDs[st.ID] = true
+		}
+		if st.DisplayOrder > maxOrder {
+			maxOrder = st.DisplayOrder
+		}
+	}
+	if len(statuses) >= 2 && maxOrder > 0 {
+		for _, st := range statuses {
+			if st.DisplayOrder == maxOrder {
+				doneIDs[st.ID] = true
+			}
+		}
+	}
+	return doneIDs
 }
 
 func (s *Store) getLowestOrderStatusID(ctx context.Context, projectID string) (string, error) {
@@ -166,9 +196,9 @@ func (s *Store) CreateIssue(ctx context.Context, projectID, creatorUserID string
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO issues (id, project_id, template_id, type_id, owner_user_id, state, title, description, display_order, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $9)
-	`, issueID, projectID, tplID, typeID, creatorUserID, title, desc, maxOrder+1, now); err != nil {
+		INSERT INTO issues (id, project_id, template_id, type_id, owner_user_id, state, title, description, premortem, postmortem, display_order, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $10, $11, $11)
+	`, issueID, projectID, tplID, typeID, creatorUserID, title, desc, in.Premortem, in.Postmortem, maxOrder+1, now); err != nil {
 		return nil, err
 	}
 
@@ -238,11 +268,11 @@ func (s *Store) GetIssue(ctx context.Context, projectID, issueID, viewerUserID s
 	var tplID, typeID sql.NullString
 	var desc string
 	err = s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, template_id, type_id, owner_user_id, state, title, description, display_order, created_at, updated_at
+		SELECT id, project_id, template_id, type_id, owner_user_id, state, title, description, premortem, postmortem, display_order, created_at, updated_at
 		FROM issues WHERE id = $1 AND project_id = $2
 	`, issueID, projectID).Scan(
 		&iss.ID, &iss.ProjectID, &tplID, &typeID, &iss.OwnerUserID, &iss.State,
-		&iss.Title, &desc, &iss.DisplayOrder, &iss.CreatedAt, &iss.UpdatedAt,
+		&iss.Title, &desc, &iss.Premortem, &iss.Postmortem, &iss.DisplayOrder, &iss.CreatedAt, &iss.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -277,7 +307,8 @@ func (s *Store) GetIssue(ctx context.Context, projectID, issueID, viewerUserID s
 		return nil, err
 	}
 	iss.Tasks = tasks
-	iss.Rollup = domain.CalculateIssueRollup(tasks, proj.HoursPerDay)
+	doneStatusIDs := s.getProjectDoneStatusIDs(ctx, projectID)
+	iss.Rollup = domain.CalculateIssueRollup(tasks, proj.HoursPerDay, doneStatusIDs)
 	return &iss, nil
 }
 
@@ -288,6 +319,18 @@ func (s *Store) ListIssuesWithTasks(ctx context.Context, projectID, viewerUserID
 	}
 	if !proj.IsMember {
 		return nil, ErrForbidden
+	}
+
+	if filter.SprintID == "active" {
+		var activeSprintID string
+		err := s.db.QueryRowContext(ctx, `
+			SELECT id FROM sprints WHERE project_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1
+		`, projectID).Scan(&activeSprintID)
+		if err != nil {
+			filter.SprintID = "__no_active_sprint__"
+		} else {
+			filter.SprintID = activeSprintID
+		}
 	}
 
 	stateFilter := filter.IssueState
@@ -340,7 +383,7 @@ func (s *Store) ListIssuesWithTasks(ctx context.Context, projectID, viewerUserID
 			}
 		}
 
-		hasActiveTaskFilter := len(filter.LabelIDs) > 0 || filter.AssigneeID != "" || filter.StatusID != "" || filter.TypeID != "" || strings.TrimSpace(filter.Keyword) != ""
+		hasActiveTaskFilter := len(filter.LabelIDs) > 0 || filter.AssigneeID != "" || filter.StatusID != "" || filter.TypeID != "" || filter.SprintID != "" || strings.TrimSpace(filter.Keyword) != ""
 		if hasActiveTaskFilter {
 			if len(filteredTasks) == 0 && !issueMatchesSelf {
 				continue
@@ -355,7 +398,7 @@ func (s *Store) ListIssuesWithTasks(ctx context.Context, projectID, viewerUserID
 }
 
 func (s *Store) issueMatchesFilter(iss *domain.Issue, filter IssueTaskFilter) bool {
-	if filter.AssigneeID != "" || filter.StatusID != "" {
+	if filter.AssigneeID != "" || filter.StatusID != "" || filter.SprintID != "" {
 		return false
 	}
 	if filter.TypeID != "" {
@@ -381,6 +424,15 @@ func (s *Store) issueMatchesFilter(iss *domain.Issue, filter IssueTaskFilter) bo
 }
 
 func (s *Store) taskMatchesFilter(t *domain.Task, filter IssueTaskFilter, assigneeGroupIDs []string) bool {
+	if filter.SprintID == "unassigned" {
+		if t.SprintID != nil && *t.SprintID != "" {
+			return false
+		}
+	} else if filter.SprintID != "" {
+		if t.SprintID == nil || *t.SprintID != filter.SprintID {
+			return false
+		}
+	}
 	if filter.TypeID != "" {
 		if t.TypeID == nil || *t.TypeID != filter.TypeID {
 			return false
@@ -499,6 +551,14 @@ func (s *Store) UpdateIssue(ctx context.Context, projectID, issueID, actorUserID
 	if in.Description != nil {
 		currentDesc = *in.Description
 	}
+	premortem := existing.Premortem
+	if in.Premortem != nil {
+		premortem = *in.Premortem
+	}
+	postmortem := existing.Postmortem
+	if in.Postmortem != nil {
+		postmortem = *in.Postmortem
+	}
 	state := existing.State
 	if in.State != nil {
 		if *in.State != domain.IssueStateOpen && *in.State != domain.IssueStateClosed {
@@ -531,9 +591,9 @@ func (s *Store) UpdateIssue(ctx context.Context, projectID, issueID, actorUserID
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE issues
-		SET template_id = $1, type_id = $2, state = $3, title = $4, description = $5, display_order = $6, updated_at = $7
-		WHERE id = $8 AND project_id = $9
-	`, tplID, rawTypeID, state, title, currentDesc, displayOrder, now, issueID, projectID); err != nil {
+		SET template_id = $1, type_id = $2, state = $3, title = $4, description = $5, premortem = $6, postmortem = $7, display_order = $8, updated_at = $9
+		WHERE id = $10 AND project_id = $11
+	`, tplID, rawTypeID, state, title, currentDesc, premortem, postmortem, displayOrder, now, issueID, projectID); err != nil {
 		return nil, err
 	}
 

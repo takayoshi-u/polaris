@@ -155,6 +155,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/v1/labels/{labelId}", s.requireSystemPerm(domain.PermManageSystem, s.handleUpdateSystemLabel))
 	s.mux.HandleFunc("DELETE /api/v1/labels/{labelId}", s.requireSystemPerm(domain.PermManageSystem, s.handleDeleteSystemLabel))
 
+	// System Common Types
+	s.mux.HandleFunc("GET /api/v1/system/types", s.requireSystemPerm(domain.PermManageSystem, s.handleListSystemTypes))
+	s.mux.HandleFunc("POST /api/v1/system/types", s.requireSystemPerm(domain.PermManageSystem, s.handleCreateSystemType))
+	s.mux.HandleFunc("PUT /api/v1/system/types/{typeId}", s.requireSystemPerm(domain.PermManageSystem, s.handleUpdateSystemType))
+	s.mux.HandleFunc("DELETE /api/v1/system/types/{typeId}", s.requireSystemPerm(domain.PermManageSystem, s.handleDeleteSystemType))
+
 	// Projects & Project-scoped Resources
 	s.mux.HandleFunc("GET /api/v1/projects", s.requireAuth(s.requireScope("read:projects", s.handleListProjects)))
 	s.mux.HandleFunc("POST /api/v1/projects", s.requireSystemPerm(domain.PermCreateProject, s.handleCreateProject))
@@ -175,6 +181,11 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/labels", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleCreateProjectLabel)))
 	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}/labels/{labelId}", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleUpdateProjectLabel)))
 	s.mux.HandleFunc("DELETE /api/v1/projects/{projectId}/labels/{labelId}", s.requireProjectRole(domain.RoleAdmin, s.requireScope("write:projects", s.handleDeleteProjectLabel)))
+
+	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/types", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListProjectTypes)))
+	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/types", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleCreateProjectType)))
+	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}/types/{typeId}", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleUpdateProjectType)))
+	s.mux.HandleFunc("DELETE /api/v1/projects/{projectId}/types/{typeId}", s.requireProjectRole(domain.RoleAdmin, s.requireScope("write:projects", s.handleDeleteProjectType)))
 
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/statuses", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListProjectStatuses)))
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/statuses", s.requireProjectRole(domain.RoleAdmin, s.requireScope("write:projects", s.handleCreateProjectStatus)))

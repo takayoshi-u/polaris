@@ -6,6 +6,7 @@
 
 システムの詳細仕様・データベース設計・API仕様は以下のドキュメントを参照してください。
 
+- **[クイックスタートガイド (`QUICKSTART.md`)](QUICKSTART.md)** — 最短1分で動かせる Docker 起動手順・チュートリアル
 - **[確定仕様書 (`docs/specification.md`)](docs/specification.md)** — システム全体のドメインルール、権限モデル、画面・機能仕様
 - **[ER図・テーブル定義書 (`docs/er.md`)](docs/er.md)** — PostgreSQL 17 データベースの Mermaid ER図および全 29 テーブルの定義（全主キー UUID v7）
 - **[OpenAPI 3.0.3 仕様書 (`docs/openapi.yaml`)](docs/openapi.yaml)** — バックエンド REST API（`/api/v1`）の全エンドポイント・リクエスト／レスポンススキーマ定義
@@ -115,9 +116,18 @@
 
 ## 起動方法
 
-### 1. Docker Compose で一括起動する場合
+詳細は **[クイックスタートガイド (`QUICKSTART.md`)](QUICKSTART.md)** をご覧ください。
+
+### 1. クイックスタートスクリプトで一括起動する場合（推奨）
 
 ```bash
+# 依存確認・.env初期化・Docker Compose起動をワンコマンドで実行
+./quickstart.sh
+```
+
+手動で起動する場合：
+```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 

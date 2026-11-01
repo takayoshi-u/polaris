@@ -1,0 +1,79 @@
+# ==============================================================================
+# Polaris - 本番/事前ビルド済みコンテナ運用 Docker Compose (docker-compose.prod.yml)
+# ==============================================================================
+# GitHub Container Registry (ghcr.io) に公開された事前ビルド済みイメージを使用して起動します。
+# 起動コマンド:
+#   docker compose -f docker-compose.prod.yml up -d
+# ==============================================================================
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: polaris-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-polaris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-polaris}
+      POSTGRES_DB: ${POSTGRES_DB:-polaris}
+      TZ: UTC
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - polaris_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-polaris} -d ${POSTGRES_DB:-polaris}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: polaris-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+
+  api:
+    image: ghcr.io/takayoshi-u/polaris-backend:latest
+    container_name: polaris-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-polaris}:${POSTGRES_PASSWORD:-polaris}@db:5432/${POSTGRES_DB:-polaris}?sslmode=disable
+      PORT: "8080"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:3000}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      INIT_ADMIN_EMAIL: ${INIT_ADMIN_EMAIL:-}
+      INIT_ADMIN_PASSWORD: ${INIT_ADMIN_PASSWORD:-}
+      INIT_ADMIN_NAME: ${INIT_ADMIN_NAME:-System Admin}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-http://localhost:3000/auth/google/callback}
+      FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+    ports:
+      - "${API_PORT:-8080}:8080"
+
+  web:
+    image: ghcr.io/takayoshi-u/polaris-frontend:latest
+    container_name: polaris-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://localhost:8080/api/v1}
+      NUXT_PUBLIC_FIREBASE_API_KEY: ${NUXT_PUBLIC_FIREBASE_API_KEY:-}
+      NUXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NUXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+      NUXT_PUBLIC_FIREBASE_PROJECT_ID: ${NUXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+      NUXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NUXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
+      NUXT_PUBLIC_FIREBASE_APP_ID: ${NUXT_PUBLIC_FIREBASE_APP_ID:-}
+      NUXT_PUBLIC_FIREBASE_VAPID_KEY: ${NUXT_PUBLIC_FIREBASE_VAPID_KEY:-}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  polaris_pgdata:
+

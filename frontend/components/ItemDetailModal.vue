@@ -63,6 +63,24 @@
           </select>
         </div>
 
+        <!-- Type Switcher -->
+        <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input);">
+          <span style="color: var(--text-muted);">種別:</span>
+          <select v-model="form.type_id" :disabled="!canEditAny" style="padding: 2px 6px; font-size: 13px;">
+            <option value="">(未設定)</option>
+            <option v-for="tp in types || []" :key="tp.id" :value="tp.id">
+              {{ tp.name }}
+            </option>
+          </select>
+          <span
+            v-if="selectedType"
+            class="badge"
+            :style="{ backgroundColor: selectedType.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }"
+          >
+            {{ selectedType.name }}
+          </span>
+        </div>
+
         <!-- Template Switcher -->
         <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input);">
           <span style="color: var(--text-muted);">テンプレート:</span>
@@ -97,6 +115,13 @@
           <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted);">
             <span :class="['badge', targetType === 'issue' ? 'badge-green' : 'badge-blue']">
               {{ targetType === 'issue' ? '課題 (Issue)' : 'タスク (Task)' }}
+            </span>
+            <span
+              v-if="selectedType"
+              class="badge"
+              :style="{ backgroundColor: selectedType.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }"
+            >
+              {{ selectedType.name }}
             </span>
             <span v-if="targetType === 'task' && parentIssueTitle">
               親課題: <strong>{{ parentIssueTitle }}</strong>
@@ -205,6 +230,23 @@
             <!-- Standard Field: title -->
             <div v-else-if="field.field_source === 'standard' && field.field_key === 'title'">
               <input v-model="form.title" type="text" :disabled="!isFieldEditable(field)" style="width: 100%;" />
+            </div>
+
+            <!-- Standard Field: type -->
+            <div v-else-if="field.field_source === 'standard' && field.field_key === 'type'" style="display: flex; align-items: center; gap: 8px;">
+              <select v-model="form.type_id" :disabled="!isFieldEditable(field)" style="flex: 1; max-width: 280px;">
+                <option value="">-- 未設定 --</option>
+                <option v-for="tp in types || []" :key="tp.id" :value="tp.id">
+                  ● {{ tp.name }}
+                </option>
+              </select>
+              <span
+                v-if="selectedType"
+                class="badge"
+                :style="{ backgroundColor: selectedType.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }"
+              >
+                {{ selectedType.name }}
+              </span>
             </div>
 
             <!-- Standard Field: description -->
@@ -954,6 +996,7 @@ import type {
   FieldPermissionState,
   Group,
   Issue,
+  ItemType,
   Label,
   ProjectRole,
   Sprint,
@@ -986,6 +1029,7 @@ const props = defineProps<{
   groups: Group[]
   sprints?: Sprint[]
   allTasks?: Task[]
+  types?: ItemType[]
 }>()
 
 const emit = defineEmits<{
@@ -1094,6 +1138,7 @@ const form = reactive({
   description: '',
   state: 'open' as 'open' | 'closed',
   template_id: '' as string | null,
+  type_id: '' as string,
   status_id: '',
   progress: 0,
   planned_start_date: '',
@@ -1109,6 +1154,11 @@ const form = reactive({
   assignees: [] as SubjectRef[],
   label_ids: [] as string[],
   custom_values: {} as Record<string, any>
+})
+
+const selectedType = computed<ItemType | null>(() => {
+  if (!form.type_id) return null
+  return (props.types || []).find(t => t.id === form.type_id) || null
 })
 
 const fieldPermissions = computed<Record<string, FieldPermissionState>>(() => {
@@ -1135,8 +1185,8 @@ const layoutRows = computed<TemplateRow[]>(() => {
   } else {
     const stdKeys =
       props.targetType === 'issue'
-        ? ['title', 'labels', 'description']
-        : ['title', 'status', 'progress', 'planned_dates', 'actual_dates', 'planned_hours', 'actual_hours', 'planned_cost', 'actual_cost', 'assignees', 'labels', 'description']
+        ? ['title', 'type', 'labels', 'description']
+        : ['title', 'type', 'status', 'progress', 'planned_dates', 'actual_dates', 'planned_hours', 'actual_hours', 'planned_cost', 'actual_cost', 'assignees', 'labels', 'description']
     baseRows = stdKeys.map((k, idx) => ({
       row_order: idx + 1,
       columns_count: 1,
@@ -1202,12 +1252,14 @@ function initForm() {
     form.description = props.issue.description || ''
     form.state = props.issue.state
     form.template_id = props.issue.template_id || applicableTemplates.value[0]?.id || null
+    form.type_id = props.issue.type_id || ''
     form.label_ids = [...(props.issue.label_ids || [])]
     form.custom_values = JSON.parse(JSON.stringify(props.issue.custom_values || {}))
   } else if (props.targetType === 'task' && props.task) {
     form.title = props.task.title
     form.description = props.task.description || ''
     form.template_id = props.task.template_id || applicableTemplates.value[0]?.id || null
+    form.type_id = props.task.type_id || ''
     form.status_id = props.task.status_id
     form.progress = props.task.progress
     form.planned_start_date = props.task.planned_start_date || ''
@@ -1274,6 +1326,7 @@ function getFieldLabel(f: TemplateField): string {
   }
   const names: Record<string, string> = {
     title: 'タイトル',
+    type: '種別 (Type)',
     description: '説明 (Markdown)',
     labels: 'ラベル',
     status: 'ステータス',
@@ -1334,6 +1387,7 @@ async function saveItem() {
       if (isKeyEditable('description')) payload.description = form.description
       if (isKeyEditable('state')) payload.state = form.state
       if (form.template_id) payload.template_id = form.template_id
+      payload.type_id = form.type_id || null
       if (isKeyEditable('labels')) payload.label_ids = form.label_ids
 
       const filteredCustom: Record<string, any> = {}
@@ -1355,6 +1409,7 @@ async function saveItem() {
       if (isKeyEditable('title')) payload.title = form.title
       if (isKeyEditable('description')) payload.description = form.description
       if (form.template_id) payload.template_id = form.template_id
+      payload.type_id = form.type_id || null
       if (isKeyEditable('status')) payload.status_id = form.status_id
       if (isKeyEditable('progress')) payload.progress = Number(form.progress)
 

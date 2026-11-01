@@ -99,6 +99,32 @@ func (s *Store) EnsureSystemDefaults(ctx context.Context, initAdminEmail, initAd
 		}
 	}
 
+	// 2.5 Ensure system default types (project_id IS NULL) exist
+	var typeCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM types WHERE project_id IS NULL`).Scan(&typeCount); err != nil {
+		return err
+	}
+	if typeCount == 0 {
+		defaultTypes := []struct {
+			name  string
+			color string
+			order int
+		}{
+			{"タスク", "#3b82f6", 1},
+			{"バグ", "#ef4444", 2},
+			{"機能要望", "#10b981", 3},
+			{"改善", "#f59e0b", 4},
+		}
+		for _, dt := range defaultTypes {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO types (id, project_id, name, color, display_order)
+				VALUES ($1, NULL, $2, $3, $4)
+			`, id.NewV7String(), dt.name, dt.color, dt.order); err != nil {
+				return err
+			}
+		}
+	}
+
 	// 3. Ensure system default templates (project_id IS NULL) exist
 	var issueTplID, taskTplID string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM templates WHERE project_id IS NULL AND target_type = 'issue' ORDER BY created_at LIMIT 1`).Scan(&issueTplID)

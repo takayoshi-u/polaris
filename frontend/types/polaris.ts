@@ -128,6 +128,15 @@ export interface Status {
   created_at: string
 }
 
+export interface ItemType {
+  id: string
+  project_id: string | null
+  name: string
+  color: string
+  display_order: number
+  created_at: string
+}
+
 export interface Label {
   id: string
   project_id?: string | null
@@ -204,6 +213,8 @@ export interface Task {
   project_id: string
   issue_id: string
   template_id?: string | null
+  type_id?: string | null
+  type?: ItemType | null
   owner_user_id: string
   status_id: string
   title: string
@@ -233,6 +244,8 @@ export interface Issue {
   id: string
   project_id: string
   template_id?: string | null
+  type_id?: string | null
+  type?: ItemType | null
   owner_user_id: string
   state: 'open' | 'closed'
   title: string

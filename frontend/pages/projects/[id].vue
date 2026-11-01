@@ -18,6 +18,7 @@
       :groups="allGroups"
       :sprints="sprints"
       :all-tasks="allTasks"
+      :types="projectTypes"
       @close="closeDetailView"
       @updated="onDetailUpdated"
     />
@@ -136,6 +137,16 @@
             <option value="open">オープン</option>
             <option value="closed">クローズ</option>
             <option value="all">すべて</option>
+          </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <span style="color: var(--text-muted);">種別:</span>
+          <select v-model="filters.type_id" @change="loadIssues">
+            <option value="">すべての種別</option>
+            <option v-for="tp in projectTypes" :key="tp.id" :value="tp.id">
+              {{ tp.name }}
+            </option>
           </select>
         </div>
 
@@ -264,6 +275,18 @@
                   {{ iss.state.toUpperCase() }}
                 </span>
                 <span
+                  v-if="getType(iss.type_id)"
+                  class="badge"
+                  :style="{
+                    backgroundColor: getType(iss.type_id)?.color,
+                    color: '#fff',
+                    fontSize: '11px',
+                    fontWeight: '700'
+                  }"
+                >
+                  {{ getType(iss.type_id)?.name }}
+                </span>
+                <span
                   style="font-size: 15px; font-weight: 700; cursor: pointer; color: var(--primary);"
                   @click="openIssueDetail(iss)"
                 >
@@ -353,7 +376,22 @@
                     @click="openTaskDetail(t, iss)"
                   >
                     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
-                      <span style="font-size: 14px; font-weight: 700;">{{ t.title }}</span>
+                      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span
+                          v-if="getType(t.type_id)"
+                          class="badge"
+                          :style="{
+                            backgroundColor: getType(t.type_id)?.color,
+                            color: '#fff',
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            padding: '1px 6px'
+                          }"
+                        >
+                          {{ getType(t.type_id)?.name }}
+                        </span>
+                        <span style="font-size: 14px; font-weight: 700;">{{ t.title }}</span>
+                      </div>
                       <span class="badge badge-blue">{{ t.progress }}%</span>
                     </div>
 
@@ -722,6 +760,7 @@
         :statuses="statuses"
         :users="users"
         :can-edit="canEditProjectItems"
+        :types="projectTypes"
         @open-issue="openIssueDetail"
         @open-task="openTaskDetail"
         @refresh="refreshAllWorkspace"
@@ -953,7 +992,99 @@
         </div>
       </div>
 
-      <!-- 4. Template Layout & Field Permission Builder -->
+      <!-- 4. Project Types Management -->
+      <div class="card" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <h3 style="font-size: 15px; font-weight: 700;">種別設定 (Types)</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              課題およびタスクに設定できる種別を管理します。システム共通種別に加え、プロジェクト固有の種別を追加できます。
+            </p>
+          </div>
+          <span class="badge badge-blue">合計 {{ projectTypes.length }}件</span>
+        </div>
+
+        <!-- Add Project Specific Type Form -->
+        <form style="display: flex; flex-direction: column; gap: 10px; max-width: 680px;" @submit.prevent="createProjectType">
+          <div style="display: grid; grid-template-columns: 80px 1fr 140px; gap: 8px; align-items: end;">
+            <div>
+              <label class="field-label">表示順 *</label>
+              <input v-model.number="projectTypeForm.display_order" type="number" min="1" required style="width: 100%;" />
+            </div>
+            <div>
+              <label class="field-label">種別名 *</label>
+              <input v-model="projectTypeForm.name" type="text" required placeholder="例: リファクタリング, QA確認" style="width: 100%;" />
+            </div>
+            <div>
+              <label class="field-label">カラー</label>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input v-model="projectTypeForm.color" type="color" style="width: 44px; height: 34px; padding: 2px; cursor: pointer;" />
+                <span class="badge" :style="{ backgroundColor: projectTypeForm.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }">
+                  プレビュー
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Color Presets -->
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label class="field-label">プリセットカラー</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <button
+                v-for="c in PRESET_COLORS"
+                :key="c"
+                type="button"
+                style="width: 22px; height: 22px; border-radius: 4px; cursor: pointer; border: 2px solid transparent;"
+                :style="{
+                  backgroundColor: c,
+                  borderColor: projectTypeForm.color.toLowerCase() === c.toLowerCase() ? 'var(--text-main)' : 'transparent'
+                }"
+                :title="c"
+                @click="projectTypeForm.color = c"
+              />
+            </div>
+          </div>
+
+          <div>
+            <button type="submit" class="btn btn-primary btn-sm">＋ プロジェクト固有種別を追加</button>
+          </div>
+        </form>
+
+        <!-- Types List -->
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); margin-top: 6px;">利用可能な種別一覧</div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px;">
+            <div
+              v-for="tp in sortedProjectTypes"
+              :key="tp.id"
+              style="padding: 8px 12px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
+            >
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span
+                  class="badge"
+                  :style="{ backgroundColor: tp.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }"
+                >
+                  {{ tp.name }}
+                </span>
+                <span v-if="!tp.project_id" class="badge badge-slate" style="font-size: 10px;">共通</span>
+                <span v-else class="badge badge-blue" style="font-size: 10px;">固有</span>
+                <span style="font-size: 11px; color: var(--text-muted);">順序: {{ tp.display_order }}</span>
+              </div>
+
+              <!-- Actions for Project Specific Types -->
+              <div v-if="tp.project_id" style="display: flex; align-items: center; gap: 6px;">
+                <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 11px;" @click="openEditProjectTypeModal(tp)">編集</button>
+                <button type="button" class="btn btn-danger btn-sm" style="padding: 2px 6px; font-size: 11px;" @click="deleteProjectType(tp)">削除</button>
+              </div>
+              <div v-else style="font-size: 11px; color: var(--text-muted);">
+                参照のみ
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Template Layout & Field Permission Builder -->
       <TemplateBuilder
         title="プロジェクトテンプレート ＆ レイアウトビルダー"
         :templates="templates"
@@ -1382,6 +1513,56 @@
       </div>
     </div>
 
+    <!-- Edit Project Type Modal -->
+    <div v-if="editingProjectType" class="modal-backdrop" @click.self="editingProjectType = null">
+      <div class="modal-panel" style="max-width: 460px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <h3 style="font-size: 15px; font-weight: 700;">プロジェクト種別の編集</h3>
+          <button class="btn btn-secondary btn-sm" @click="editingProjectType = null">✕</button>
+        </div>
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="updateProjectType">
+          <div>
+            <label class="field-label">表示順 *</label>
+            <input v-model.number="editProjectTypeForm.display_order" type="number" min="1" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">種別名 *</label>
+            <input v-model="editProjectTypeForm.name" type="text" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">カラー</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input v-model="editProjectTypeForm.color" type="color" style="width: 44px; height: 34px; padding: 2px; cursor: pointer;" />
+              <span class="badge" :style="{ backgroundColor: editProjectTypeForm.color, color: '#fff', fontSize: '11px', fontWeight: 'bold' }">
+                プレビュー: {{ editProjectTypeForm.name || '種別' }}
+              </span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label class="field-label">プリセットカラー</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <button
+                v-for="c in PRESET_COLORS"
+                :key="c"
+                type="button"
+                style="width: 22px; height: 22px; border-radius: 4px; cursor: pointer; border: 2px solid transparent;"
+                :style="{
+                  backgroundColor: c,
+                  borderColor: editProjectTypeForm.color.toLowerCase() === c.toLowerCase() ? 'var(--text-main)' : 'transparent'
+                }"
+                :title="c"
+                @click="editProjectTypeForm.color = c"
+              />
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+            <button type="button" class="btn btn-secondary" @click="editingProjectType = null">キャンセル</button>
+            <button type="submit" class="btn btn-primary">変更を保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- CSV Import Modal -->
     <CSVImportModal
       v-if="showCSVImportModal"
@@ -1400,6 +1581,7 @@ import type {
   Group,
   InboundWebhook,
   Issue,
+  ItemType,
   Label,
   Project,
   ProjectMember,
@@ -1424,6 +1606,19 @@ import {
   generateDateRangeYMD,
   hasAtMostTwoDecimals
 } from '~/utils/format'
+
+const PRESET_COLORS = [
+  '#3b82f6', // blue
+  '#ef4444', // red
+  '#10b981', // green
+  '#f59e0b', // amber
+  '#8b5cf6', // purple
+  '#ec4899', // pink
+  '#6366f1', // indigo
+  '#64748b', // slate
+  '#06b6d4', // cyan
+  '#f97316'  // orange
+]
 
 const route = useRoute()
 const router = useRouter()
@@ -1488,6 +1683,13 @@ const users = ref<User[]>([])
 const issues = ref<Issue[]>([])
 const sprints = ref<Sprint[]>([])
 const dependencies = ref<TaskDependency[]>([])
+const projectTypes = ref<ItemType[]>([])
+const sortedProjectTypes = computed(() => [...projectTypes.value].sort((a, b) => a.display_order - b.display_order))
+
+function getType(typeId?: string | null): ItemType | undefined {
+  if (!typeId) return undefined
+  return projectTypes.value.find(t => t.id === typeId)
+}
 
 const autoScheduleEnabled = ref(true)
 const showDependencyLines = ref(true)
@@ -1600,6 +1802,7 @@ const allGroups = computed(() => {
 
 const filters = reactive({
   issue_state: 'open',
+  type_id: '',
   status_id: '',
   assignee_id: '',
   keyword: '',
@@ -1783,6 +1986,19 @@ const cfForm = reactive({
   options_csv: ''
 })
 
+const projectTypeForm = reactive({
+  name: '',
+  color: '#3b82f6',
+  display_order: 1
+})
+
+const editingProjectType = ref<ItemType | null>(null)
+const editProjectTypeForm = reactive({
+  name: '',
+  color: '#3b82f6',
+  display_order: 1
+})
+
 function updateTimelinePaneWidth() {
   if (timelinePaneRef.value) {
     timelinePaneWidth.value = timelinePaneRef.value.clientWidth
@@ -1948,7 +2164,7 @@ async function openTargetFromQuery(raw: string) {
 async function loadWorkspace() {
   if (!projectId.value) return
   try {
-    const [p, sts, pLabels, sLabels, cfs, tpls, mems, pGrps, gGrps, usrs, sps, deps] = await Promise.all([
+    const [p, sts, pLabels, sLabels, cfs, tpls, mems, pGrps, gGrps, usrs, sps, deps, pts] = await Promise.all([
       apiFetch<Project>(`/projects/${projectId.value}`),
       apiFetch<Status[]>(`/projects/${projectId.value}/statuses`),
       apiFetch<Label[]>(`/projects/${projectId.value}/labels`),
@@ -1960,7 +2176,8 @@ async function loadWorkspace() {
       apiFetch<Group[]>('/groups'),
       apiFetch<User[]>('/users'),
       apiFetch<Sprint[]>(`/projects/${projectId.value}/sprints`).catch(() => []),
-      apiFetch<TaskDependency[]>(`/projects/${projectId.value}/dependencies`).catch(() => [])
+      apiFetch<TaskDependency[]>(`/projects/${projectId.value}/dependencies`).catch(() => []),
+      apiFetch<ItemType[]>(`/projects/${projectId.value}/types`).catch(() => [])
     ])
     project.value = p
     statuses.value = (sts || []).sort((a, b) => a.display_order - b.display_order)
@@ -1974,6 +2191,10 @@ async function loadWorkspace() {
     users.value = usrs || []
     sprints.value = sps || []
     dependencies.value = deps || []
+    projectTypes.value = pts || []
+    if (!projectTypeForm.name) {
+      projectTypeForm.display_order = Math.max(...projectTypes.value.map(t => t.display_order), 0) + 1
+    }
 
     projForm.name = p.name
     projForm.description = p.description
@@ -1999,6 +2220,7 @@ async function loadIssues() {
   if (!projectId.value) return
   const params = new URLSearchParams()
   if (filters.issue_state) params.set('state', filters.issue_state)
+  if (filters.type_id) params.set('type_id', filters.type_id)
   if (filters.status_id) params.set('status_id', filters.status_id)
   if (filters.assignee_id) params.set('assignee_id', filters.assignee_id)
   if (filters.keyword.trim()) params.set('keyword', filters.keyword.trim())
@@ -2490,6 +2712,62 @@ async function deleteProjectLabel(labelId: string) {
     await apiFetch(`/projects/${projectId.value}/labels/${labelId}`, { method: 'DELETE' })
     await loadWorkspace()
     notifyToast('ラベルを削除しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function createProjectType() {
+  if (!projectTypeForm.name.trim()) return
+  try {
+    await apiFetch(`/projects/${projectId.value}/types`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: projectTypeForm.name.trim(),
+        color: projectTypeForm.color,
+        display_order: projectTypeForm.display_order
+      })
+    })
+    projectTypeForm.name = ''
+    await loadWorkspace()
+    notifyToast('プロジェクト種別を追加しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+function openEditProjectTypeModal(tp: ItemType) {
+  editingProjectType.value = tp
+  editProjectTypeForm.name = tp.name
+  editProjectTypeForm.color = tp.color
+  editProjectTypeForm.display_order = tp.display_order
+}
+
+async function updateProjectType() {
+  if (!editingProjectType.value || !editProjectTypeForm.name.trim()) return
+  try {
+    await apiFetch(`/projects/${projectId.value}/types/${editingProjectType.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: editProjectTypeForm.name.trim(),
+        color: editProjectTypeForm.color,
+        display_order: editProjectTypeForm.display_order
+      })
+    })
+    editingProjectType.value = null
+    await loadWorkspace()
+    notifyToast('プロジェクト種別を更新しました', 'success')
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  }
+}
+
+async function deleteProjectType(tp: ItemType) {
+  if (!confirm(`種別「${tp.name}」を削除してもよろしいですか？`)) return
+  try {
+    await apiFetch(`/projects/${projectId.value}/types/${tp.id}`, { method: 'DELETE' })
+    await loadWorkspace()
+    notifyToast('プロジェクト種別を削除しました', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
   }

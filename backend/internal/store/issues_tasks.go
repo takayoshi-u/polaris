@@ -15,6 +15,7 @@ import (
 
 type IssueCreateInput struct {
 	TemplateID        *string
+	TypeID            *string
 	Title             string
 	Description       string
 	LabelIDs          []string
@@ -24,6 +25,8 @@ type IssueCreateInput struct {
 
 type IssueUpdateInput struct {
 	TemplateID   *string
+	TypeID       *string
+	ClearTypeID  bool
 	State        *string
 	Title        *string
 	Description  *string
@@ -36,6 +39,7 @@ type TaskCreateInput struct {
 	IssueID          string
 	SprintID         *string
 	TemplateID       *string
+	TypeID           *string
 	StatusID         *string
 	Title            string
 	Description      string
@@ -59,6 +63,8 @@ type TaskUpdateInput struct {
 	SprintID          *string
 	ClearSprintID     bool
 	TemplateID        *string
+	TypeID            *string
+	ClearTypeID       bool
 	StatusID          *string
 	Title             *string
 	Description       *string
@@ -88,6 +94,7 @@ type IssueTaskFilter struct {
 	LabelIDs   []string
 	AssigneeID string
 	StatusID   string
+	TypeID     string
 	IssueState string // "open" (default), "closed", "all"
 	Keyword    string
 }
@@ -146,10 +153,22 @@ func (s *Store) CreateIssue(ctx context.Context, projectID, creatorUserID string
 	var maxOrder int
 	_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), 0) FROM issues WHERE project_id = $1`, projectID).Scan(&maxOrder)
 
+	var typeID *string
+	if in.TypeID != nil && *in.TypeID != "" {
+		it, err := s.GetType(ctx, *in.TypeID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid type_id", ErrBadRequest)
+		}
+		if it.ProjectID != nil && *it.ProjectID != projectID {
+			return nil, fmt.Errorf("%w: type does not belong to project", ErrBadRequest)
+		}
+		typeID = in.TypeID
+	}
+
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO issues (id, project_id, template_id, owner_user_id, state, title, description, display_order, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 'open', $5, $6, $7, $8, $8)
-	`, issueID, projectID, tplID, creatorUserID, title, desc, maxOrder+1, now); err != nil {
+		INSERT INTO issues (id, project_id, template_id, type_id, owner_user_id, state, title, description, display_order, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $9)
+	`, issueID, projectID, tplID, typeID, creatorUserID, title, desc, maxOrder+1, now); err != nil {
 		return nil, err
 	}
 
@@ -216,13 +235,13 @@ func (s *Store) GetIssue(ctx context.Context, projectID, issueID, viewerUserID s
 	}
 
 	var iss domain.Issue
-	var tplID sql.NullString
+	var tplID, typeID sql.NullString
 	var desc string
 	err = s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, template_id, owner_user_id, state, title, description, display_order, created_at, updated_at
+		SELECT id, project_id, template_id, type_id, owner_user_id, state, title, description, display_order, created_at, updated_at
 		FROM issues WHERE id = $1 AND project_id = $2
 	`, issueID, projectID).Scan(
-		&iss.ID, &iss.ProjectID, &tplID, &iss.OwnerUserID, &iss.State,
+		&iss.ID, &iss.ProjectID, &tplID, &typeID, &iss.OwnerUserID, &iss.State,
 		&iss.Title, &desc, &iss.DisplayOrder, &iss.CreatedAt, &iss.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -235,6 +254,12 @@ func (s *Store) GetIssue(ctx context.Context, projectID, issueID, viewerUserID s
 		iss.TemplateID = &tplID.String
 	} else {
 		iss.TemplateID = proj.DefaultIssueTemplateID
+	}
+	if typeID.Valid {
+		iss.TypeID = &typeID.String
+		if it, err := s.GetType(ctx, typeID.String); err == nil {
+			iss.Type = it
+		}
 	}
 	iss.Description = &desc
 	iss.LabelIDs, _ = s.getItemLabelIDs(ctx, domain.TargetIssue, iss.ID)
@@ -315,7 +340,7 @@ func (s *Store) ListIssuesWithTasks(ctx context.Context, projectID, viewerUserID
 			}
 		}
 
-		hasActiveTaskFilter := len(filter.LabelIDs) > 0 || filter.AssigneeID != "" || filter.StatusID != "" || strings.TrimSpace(filter.Keyword) != ""
+		hasActiveTaskFilter := len(filter.LabelIDs) > 0 || filter.AssigneeID != "" || filter.StatusID != "" || filter.TypeID != "" || strings.TrimSpace(filter.Keyword) != ""
 		if hasActiveTaskFilter {
 			if len(filteredTasks) == 0 && !issueMatchesSelf {
 				continue
@@ -332,6 +357,11 @@ func (s *Store) ListIssuesWithTasks(ctx context.Context, projectID, viewerUserID
 func (s *Store) issueMatchesFilter(iss *domain.Issue, filter IssueTaskFilter) bool {
 	if filter.AssigneeID != "" || filter.StatusID != "" {
 		return false
+	}
+	if filter.TypeID != "" {
+		if iss.TypeID == nil || *iss.TypeID != filter.TypeID {
+			return false
+		}
 	}
 	if len(filter.LabelIDs) > 0 {
 		if !hasAllLabels(iss.LabelIDs, filter.LabelIDs) {
@@ -351,6 +381,11 @@ func (s *Store) issueMatchesFilter(iss *domain.Issue, filter IssueTaskFilter) bo
 }
 
 func (s *Store) taskMatchesFilter(t *domain.Task, filter IssueTaskFilter, assigneeGroupIDs []string) bool {
+	if filter.TypeID != "" {
+		if t.TypeID == nil || *t.TypeID != filter.TypeID {
+			return false
+		}
+	}
 	if filter.StatusID != "" && t.StatusID != filter.StatusID {
 		return false
 	}
@@ -476,11 +511,29 @@ func (s *Store) UpdateIssue(ctx context.Context, projectID, issueID, actorUserID
 		displayOrder = *in.DisplayOrder
 	}
 
+	rawTypeID := existing.TypeID
+	if in.ClearTypeID {
+		rawTypeID = nil
+	} else if in.TypeID != nil {
+		if *in.TypeID != "" {
+			it, err := s.GetType(ctx, *in.TypeID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: invalid type_id", ErrBadRequest)
+			}
+			if it.ProjectID != nil && *it.ProjectID != projectID {
+				return nil, fmt.Errorf("%w: type does not belong to project", ErrBadRequest)
+			}
+			rawTypeID = in.TypeID
+		} else {
+			rawTypeID = nil
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE issues
-		SET template_id = $1, state = $2, title = $3, description = $4, display_order = $5, updated_at = $6
-		WHERE id = $7 AND project_id = $8
-	`, tplID, state, title, currentDesc, displayOrder, now, issueID, projectID); err != nil {
+		SET template_id = $1, type_id = $2, state = $3, title = $4, description = $5, display_order = $6, updated_at = $7
+		WHERE id = $8 AND project_id = $9
+	`, tplID, rawTypeID, state, title, currentDesc, displayOrder, now, issueID, projectID); err != nil {
 		return nil, err
 	}
 
@@ -679,15 +732,27 @@ func (s *Store) CreateTask(ctx context.Context, projectID, creatorUserID string,
 	var maxKanban, maxGantt int
 	_ = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(kanban_order), 0), COALESCE(MAX(gantt_order), 0) FROM tasks WHERE issue_id = $1`, in.IssueID).Scan(&maxKanban, &maxGantt)
 
+	var taskTypeID *string
+	if in.TypeID != nil && *in.TypeID != "" {
+		it, err := s.GetType(ctx, *in.TypeID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid type_id", ErrBadRequest)
+		}
+		if it.ProjectID != nil && *it.ProjectID != projectID {
+			return nil, fmt.Errorf("%w: type does not belong to project", ErrBadRequest)
+		}
+		taskTypeID = in.TypeID
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks (
-			id, project_id, issue_id, sprint_id, template_id, owner_user_id, status_id,
+			id, project_id, issue_id, sprint_id, template_id, type_id, owner_user_id, status_id,
 			title, description, progress, planned_start_date, planned_end_date,
 			actual_start_date, actual_end_date, planned_hours, actual_hours,
 			planned_cost, actual_cost, story_points,
 			kanban_order, gantt_order, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $22)
-	`, taskID, projectID, in.IssueID, in.SprintID, tplID, creatorUserID, statusID, title, desc, in.Progress,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $23)
+	`, taskID, projectID, in.IssueID, in.SprintID, tplID, taskTypeID, creatorUserID, statusID, title, desc, in.Progress,
 		nullDate(in.PlannedStartDate), nullDate(in.PlannedEndDate),
 		nullDate(in.ActualStartDate), nullDate(in.ActualEndDate),
 		in.PlannedHours, in.ActualHours, plannedCost, actualCost, in.StoryPoints, maxKanban+1, maxGantt+1, now); err != nil {
@@ -763,20 +828,20 @@ func (s *Store) GetTask(ctx context.Context, projectID, taskID, viewerUserID str
 
 func (s *Store) getTaskInternal(ctx context.Context, proj *domain.Project, taskID, viewerUserID string, userGroups []string) (*domain.Task, error) {
 	var t domain.Task
-	var tplID, sprintID sql.NullString
+	var tplID, sprintID, typeID sql.NullString
 	var desc string
 	var pStart, pEnd, aStart, aEnd sql.NullTime
 	var pHours, aHours, pCost, aCost, storyPoints sql.NullFloat64
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, project_id, issue_id, sprint_id, template_id, owner_user_id, status_id,
+		SELECT id, project_id, issue_id, sprint_id, template_id, type_id, owner_user_id, status_id,
 		       title, description, progress, planned_start_date, planned_end_date,
 		       actual_start_date, actual_end_date, planned_hours, actual_hours,
 		       planned_cost, actual_cost, story_points,
 		       kanban_order, gantt_order, created_at, updated_at
 		FROM tasks WHERE id = $1 AND project_id = $2
 	`, taskID, proj.ID).Scan(
-		&t.ID, &t.ProjectID, &t.IssueID, &sprintID, &tplID, &t.OwnerUserID, &t.StatusID,
+		&t.ID, &t.ProjectID, &t.IssueID, &sprintID, &tplID, &typeID, &t.OwnerUserID, &t.StatusID,
 		&t.Title, &desc, &t.Progress, &pStart, &pEnd,
 		&aStart, &aEnd, &pHours, &aHours,
 		&pCost, &aCost, &storyPoints,
@@ -790,6 +855,12 @@ func (s *Store) getTaskInternal(ctx context.Context, proj *domain.Project, taskI
 	}
 	if sprintID.Valid {
 		t.SprintID = &sprintID.String
+	}
+	if typeID.Valid {
+		t.TypeID = &typeID.String
+		if it, err := s.GetType(ctx, typeID.String); err == nil {
+			t.Type = it
+		}
 	}
 	if storyPoints.Valid {
 		v := storyPoints.Float64
@@ -888,18 +959,18 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 	}
 
 	var rawOwnerID, rawIssueID, rawStatusID, rawTitle, rawDesc string
-	var rawTplID, currentSprintID sql.NullString
+	var rawTplID, currentSprintID, currentTypeID sql.NullString
 	var rawProgress, rawKanbanOrder, rawGanttOrder int
 	var pStart, pEnd, aStart, aEnd sql.NullTime
 	var pHours, aHours, pCost, aCost, currentSP sql.NullFloat64
 
 	err = s.db.QueryRowContext(ctx, `
-		SELECT issue_id, template_id, sprint_id, story_points, owner_user_id, status_id, title, description, progress,
+		SELECT issue_id, template_id, sprint_id, type_id, story_points, owner_user_id, status_id, title, description, progress,
 		       planned_start_date, planned_end_date, actual_start_date, actual_end_date,
 		       planned_hours, actual_hours, planned_cost, actual_cost, kanban_order, gantt_order
 		FROM tasks WHERE id = $1 AND project_id = $2
 	`, taskID, projectID).Scan(
-		&rawIssueID, &rawTplID, &currentSprintID, &currentSP, &rawOwnerID, &rawStatusID, &rawTitle, &rawDesc, &rawProgress,
+		&rawIssueID, &rawTplID, &currentSprintID, &currentTypeID, &currentSP, &rawOwnerID, &rawStatusID, &rawTitle, &rawDesc, &rawProgress,
 		&pStart, &pEnd, &aStart, &aEnd, &pHours, &aHours, &pCost, &aCost, &rawKanbanOrder, &rawGanttOrder,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1090,6 +1161,27 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 		rawStoryPoints = in.StoryPoints
 	}
 
+	var rawTypeID *string
+	if currentTypeID.Valid {
+		rawTypeID = &currentTypeID.String
+	}
+	if in.ClearTypeID {
+		rawTypeID = nil
+	} else if in.TypeID != nil {
+		if *in.TypeID != "" {
+			it, err := s.GetType(ctx, *in.TypeID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: invalid type_id", ErrBadRequest)
+			}
+			if it.ProjectID != nil && *it.ProjectID != projectID {
+				return nil, fmt.Errorf("%w: type does not belong to project", ErrBadRequest)
+			}
+			rawTypeID = in.TypeID
+		} else {
+			rawTypeID = nil
+		}
+	}
+
 	if in.IssueID != nil && *in.IssueID != "" {
 		var issueExists int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE id = $1 AND project_id = $2`, *in.IssueID, projectID).Scan(&issueExists); err != nil || issueExists == 0 {
@@ -1115,13 +1207,13 @@ func (s *Store) UpdateTask(ctx context.Context, projectID, taskID, actorUserID s
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
-		SET issue_id = $1, sprint_id = $2, template_id = $3, status_id = $4, title = $5, description = $6,
-		    progress = $7, planned_start_date = $8, planned_end_date = $9,
-		    actual_start_date = $10, actual_end_date = $11, planned_hours = $12, actual_hours = $13,
-		    planned_cost = $14, actual_cost = $15, story_points = $16,
-		    kanban_order = $17, gantt_order = $18, updated_at = $19
-		WHERE id = $20 AND project_id = $21
-	`, rawIssueID, rawSprintID, tplID, rawStatusID, rawTitle, rawDesc, rawProgress,
+		SET issue_id = $1, sprint_id = $2, template_id = $3, type_id = $4, status_id = $5, title = $6, description = $7,
+		    progress = $8, planned_start_date = $9, planned_end_date = $10,
+		    actual_start_date = $11, actual_end_date = $12, planned_hours = $13, actual_hours = $14,
+		    planned_cost = $15, actual_cost = $16, story_points = $17,
+		    kanban_order = $18, gantt_order = $19, updated_at = $20
+		WHERE id = $21 AND project_id = $22
+	`, rawIssueID, rawSprintID, tplID, rawTypeID, rawStatusID, rawTitle, rawDesc, rawProgress,
 		nullDate(plannedStart), nullDate(plannedEnd), nullDate(actualStart), nullDate(actualEnd),
 		plannedHours, actualHours, plannedCost, actualCost, rawStoryPoints, rawKanbanOrder, rawGanttOrder, now, taskID, projectID); err != nil {
 		return nil, err

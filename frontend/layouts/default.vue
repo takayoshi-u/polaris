@@ -908,8 +908,19 @@ const isPublicRoute = computed(() => {
   )
 })
 
+// 1. 直前のプロジェクトIDを記憶するグローバルステート
+const lastActiveProjectId = useState<string | null>('polaris_last_active_project_id', () => null)
+
+// 2. ワークスペースを開いた時にIDを記憶
+watch(() => route.params.id, (newId) => {
+  if (newId && typeof newId === 'string') {
+    lastActiveProjectId.value = newId
+  }
+}, { immediate: true })
+
+// 3. activeProjectId を現在のルートID または 直前のアクティブIDから解決
 const activeProjectId = computed(() => {
-  return (route.params.id as string) || ''
+  return (route.params.id as string) || lastActiveProjectId.value || ''
 })
 
 const activeProject = computed(() => {

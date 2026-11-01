@@ -90,14 +90,6 @@
             <FolderKanban :size="16" /> プロジェクト一覧
           </NuxtLink>
           <NuxtLink
-            v-if="activeProject && route.params.id !== activeProject.id"
-            :to="`/projects/${activeProject.id}`"
-            class="btn btn-ghost"
-            style="justify-content: flex-start; width: 100%; font-size: 14px;"
-          >
-            <LayoutGrid :size="16" /> ワークスペースに移動
-          </NuxtLink>
-          <NuxtLink
             v-if="hasSystemPerm('manage_system')"
             to="/admin"
             class="btn btn-ghost"
@@ -1046,7 +1038,7 @@
 </template>
 
 <script setup lang="ts">
-import { Bell, FolderKanban, Key, LayoutGrid, LogOut, Menu, Plus, Settings, ShieldAlert, ShieldCheck, Smartphone, Trash2 } from 'lucide-vue-next'
+import { Bell, FolderKanban, Key, LogOut, Menu, Plus, Settings, ShieldAlert, ShieldCheck, Smartphone, Trash2 } from 'lucide-vue-next'
 import type { MFAStatus, NotificationItem, PersonalAccessToken, WebAuthnCredential } from '~/types/polaris'
 import { formatHours, formatJSTDateTime, hasAtMostTwoDecimals } from '~/utils/format'
 import { isWebAuthnSupported, performWebAuthnRegister } from '~/utils/webauthn'

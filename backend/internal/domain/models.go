@@ -599,6 +599,8 @@ type BulkDirectUserResult struct {
 	Total        int                        `json:"total"`
 	CreatedCount int                        `json:"created_count"`
 	FailedCount  int                        `json:"failed_count"`
+	Succeeded    int                        `json:"succeeded"`
+	Failed       int                        `json:"failed"`
 	CreatedUsers []BulkDirectUserCredential `json:"created_users"`
 	Failures     []BulkDirectUserFailure    `json:"failures"`
 }

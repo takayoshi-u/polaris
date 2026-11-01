@@ -465,8 +465,10 @@ export interface BulkDirectUserCredential {
 
 export interface BulkDirectUserResult {
   total: number
-  succeeded: number
-  failed: number
+  created_count?: number
+  failed_count?: number
+  succeeded?: number
+  failed?: number
   created_users: BulkDirectUserCredential[]
   failures: { email: string; display_name: string; reason: string }[]
 }

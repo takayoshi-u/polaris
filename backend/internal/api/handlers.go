@@ -1257,6 +1257,7 @@ type UpdateIssueRequest struct {
 
 type CreateTaskRequest struct {
 	IssueID          string                     `json:"issue_id"`
+	SprintID         *string                    `json:"sprint_id"`
 	TemplateID       *string                    `json:"template_id"`
 	TypeID           *string                    `json:"type_id"`
 	StatusID         *string                    `json:"status_id"`
@@ -1279,6 +1280,8 @@ type CreateTaskRequest struct {
 
 type UpdateTaskRequest struct {
 	IssueID          *string                    `json:"issue_id"`
+	SprintID         *string                    `json:"sprint_id"`
+	StoryPoints      *float64                   `json:"story_points"`
 	TemplateID       *string                    `json:"template_id"`
 	TypeID           *string                    `json:"type_id"`
 	StatusID         *string                    `json:"status_id"`
@@ -1436,6 +1439,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := s.store.CreateTask(r.Context(), r.PathValue("projectId"), currentUser(r).ID, store.TaskCreateInput{
 		IssueID:          body.IssueID,
+		SprintID:         body.SprintID,
 		TemplateID:       body.TemplateID,
 		TypeID:           body.TypeID,
 		StatusID:         body.StatusID,
@@ -1575,6 +1579,37 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 		in.ActualCost = val
 		in.ClearActualCost = clear
+	}
+
+	if raw, ok := rawMap["story_points"]; ok {
+		val, clear, err := parseOptionalFloat(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid story_points"})
+			return
+		}
+		in.StoryPoints = val
+		in.ClearStoryPoints = clear
+	}
+
+	if raw, ok := rawMap["sprint_id"]; ok {
+		s := strings.TrimSpace(string(raw))
+		if s == "null" || s == `""` {
+			in.ClearSprintID = true
+			in.SprintID = nil
+		} else {
+			var spID string
+			if err := json.Unmarshal(raw, &spID); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid sprint_id"})
+				return
+			}
+			spID = strings.TrimSpace(spID)
+			if spID == "" {
+				in.ClearSprintID = true
+				in.SprintID = nil
+			} else {
+				in.SprintID = &spID
+			}
+		}
 	}
 
 	t, err := s.store.UpdateTask(r.Context(), r.PathValue("projectId"), r.PathValue("taskId"), currentUser(r).ID, in)

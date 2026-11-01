@@ -2214,6 +2214,9 @@ watch(
 )
 
 async function openTargetFromQuery(raw: string) {
+  if (route.query.item !== raw && route.query.openTarget !== raw) {
+    router.push({ query: { ...route.query, item: raw } })
+  }
   const [targetType, targetId] = raw.split(':')
   if (!targetType || !targetId) return
   if (targetType === 'issue') {
@@ -2675,7 +2678,7 @@ function openIssueDetail(iss: Issue) {
   detailModalState.task = null
   detailModalState.parentIssueTitle = ''
   detailModalState.open = true
-  router.replace({ query: { ...route.query, item: `issue:${iss.id}` } })
+  router.push({ query: { ...route.query, item: `issue:${iss.id}` } })
 }
 
 function openTaskDetail(t: Task, parentIss: Issue) {
@@ -2684,16 +2687,20 @@ function openTaskDetail(t: Task, parentIss: Issue) {
   detailModalState.issue = null
   detailModalState.parentIssueTitle = parentIss.title
   detailModalState.open = true
-  router.replace({ query: { ...route.query, item: `task:${t.id}` } })
+  router.push({ query: { ...route.query, item: `task:${t.id}` } })
 }
 
 function closeDetailView() {
   detailModalState.open = false
   if (route.query.item || route.query.openTarget) {
-    const q = { ...route.query }
-    delete q.item
-    delete q.openTarget
-    router.replace({ query: q })
+    if (typeof window !== 'undefined' && window.history.state && window.history.state.back) {
+      router.back()
+    } else {
+      const q = { ...route.query }
+      delete q.item
+      delete q.openTarget
+      router.push({ query: q })
+    }
   }
 }
 

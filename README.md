@@ -10,6 +10,7 @@
 - **[確定仕様書 (`docs/specification.md`)](docs/specification.md)** — システム全体のドメインルール、権限モデル、画面・機能仕様
 - **[ER図・テーブル定義書 (`docs/er.md`)](docs/er.md)** — PostgreSQL 17 データベースの Mermaid ER図および全 29 テーブルの定義（全主キー UUID v7）
 - **[OpenAPI 3.0.3 仕様書 (`docs/openapi.yaml`)](docs/openapi.yaml)** — バックエンド REST API（`/api/v1`）の全エンドポイント・リクエスト／レスポンススキーマ定義
+- **[テスト品質保証ガイドライン (`docs/testing_lessons_and_guidelines.md`)](docs/testing_lessons_and_guidelines.md)** — 発生した不具合の事後分析（Post-Mortem）および再発防止テスト設計原則
 - **[エージェント開発規約・PR運用規程 (`AGENTS.md`)](AGENTS.md)** — Git ブランチ戦略、Pull Request 運用ルール、エージェントチーム役割分担
 
 ---
@@ -45,7 +46,8 @@
 ├── docs/
 │   ├── specification.md             # システム全体確定仕様書
 │   ├── er.md                        # Mermaid ER図・全29テーブル定義
-│   └── openapi.yaml                 # OpenAPI 3.0.3 API仕様書
+│   ├── openapi.yaml                 # OpenAPI 3.0.3 API仕様書
+│   └── testing_lessons_and_guidelines.md # テスト品質保証ガイドライン・事後検証分析
 ├── backend/
 │   ├── Dockerfile
 │   ├── go.mod

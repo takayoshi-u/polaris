@@ -123,7 +123,7 @@ func (s *Store) AuthenticateWithPassword(ctx context.Context, email, password st
 	var mfaEnabled bool
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, password_hash, status, mfa_enabled, totp_secret
-		FROM users WHERE LOWER(email) = $1
+		FROM users WHERE LOWER(email) = $1 AND status != 'disabled'
 	`, email).Scan(&userID, &pwHash, &status, &mfaEnabled, &totpSecret)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrUnauthorized
@@ -202,7 +202,7 @@ func (s *Store) LoginWithGoogle(ctx context.Context, email, googleSub, displayNa
 	// Match by email so that if email was changed, matching the new email allows Google login
 	var userID, status string
 	err = s.db.QueryRowContext(ctx, `
-		SELECT id, status FROM users WHERE LOWER(email) = $1
+		SELECT id, status FROM users WHERE LOWER(email) = $1 AND status != 'disabled'
 	`, email).Scan(&userID, &status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", fmt.Errorf("%w: user is not pre-registered or invited", ErrForbidden)
@@ -213,6 +213,9 @@ func (s *Store) LoginWithGoogle(ctx context.Context, email, googleSub, displayNa
 	if status == domain.UserStatusDisabled {
 		return nil, "", fmt.Errorf("%w: user account is disabled", ErrForbidden)
 	}
+
+	// In case a previously disabled user had this google_sub, unlink it so the active user can link it
+	_, _ = s.db.ExecContext(ctx, `UPDATE users SET google_sub = NULL WHERE google_sub = $1 AND status = 'disabled'`, googleSub)
 
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
@@ -373,7 +376,7 @@ func (s *Store) CreateUserDirect(ctx context.Context, email, displayName, passwo
 	defer tx.Rollback()
 
 	var existing int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1`, email).Scan(&existing); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND status != 'disabled'`, email).Scan(&existing); err != nil {
 		return nil, err
 	}
 	if existing > 0 {
@@ -436,7 +439,7 @@ func (s *Store) InviteUser(ctx context.Context, email, displayName string, group
 	defer tx.Rollback()
 
 	var existing int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1`, email).Scan(&existing); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND status != 'disabled'`, email).Scan(&existing); err != nil {
 		return nil, "", err
 	}
 	if existing > 0 {
@@ -548,7 +551,7 @@ func (s *Store) BulkInviteUsers(ctx context.Context, invitations []domain.UserIn
 
 		// Check if already in DB
 		var existingCount int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1`, cleanEmail).Scan(&existingCount); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND status != 'disabled'`, cleanEmail).Scan(&existingCount); err != nil {
 			result.Failures = append(result.Failures, domain.BulkInviteFailure{
 				Email:  rawEmail,
 				Reason: "データベースエラーが発生しました",
@@ -779,7 +782,7 @@ func (s *Store) SetOrChangePassword(ctx context.Context, userID, currentPassword
 func (s *Store) RequestPasswordReset(ctx context.Context, email string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var userID, displayName, status string
-	err := s.db.QueryRowContext(ctx, `SELECT id, display_name, status FROM users WHERE LOWER(email) = $1`, email).Scan(&userID, &displayName, &status)
+	err := s.db.QueryRowContext(ctx, `SELECT id, display_name, status FROM users WHERE LOWER(email) = $1 AND status != 'disabled'`, email).Scan(&userID, &displayName, &status)
 	if errors.Is(err, sql.ErrNoRows) || status != domain.UserStatusActive {
 		// Return nil error to prevent email enumeration
 		return "", nil
@@ -870,7 +873,7 @@ func (s *Store) RequestSelfEmailChange(ctx context.Context, userID, currentPassw
 	}
 
 	var existing int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND id <> $2`, newEmail, userID).Scan(&existing); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND id <> $2 AND status != 'disabled'`, newEmail, userID).Scan(&existing); err != nil {
 		return "", err
 	}
 	if existing > 0 {
@@ -954,7 +957,7 @@ func (s *Store) AdminChangeUserEmail(ctx context.Context, targetUserID, newEmail
 	}
 
 	var existing int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND id <> $2`, newEmail, targetUserID).Scan(&existing); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) = $1 AND id <> $2 AND status != 'disabled'`, newEmail, targetUserID).Scan(&existing); err != nil {
 		return nil, "", err
 	}
 	if existing > 0 {

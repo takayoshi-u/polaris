@@ -82,6 +82,8 @@ components:
           type: boolean
         mfa_enforced:
           type: boolean
+        must_change_password:
+          type: boolean
         created_at:
           type: string
           format: date-time
@@ -1099,6 +1101,86 @@ components:
           items:
             $ref: '#/components/schemas/BulkInviteFailure'
 
+    BulkDirectUserItem:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        password:
+          type: string
+        group_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [create_project, delete_project, manage_system]
+
+    BulkDirectUserRequest:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDirectUserItem'
+        default_password:
+          type: string
+        must_change_password:
+          type: boolean
+          default: true
+        default_group_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        default_permissions:
+          type: array
+          items:
+            type: string
+            enum: [create_project, delete_project, manage_system]
+
+    BulkDirectUserCredential:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        temp_password:
+          type: string
+
+    BulkDirectUserFailure:
+      type: object
+      properties:
+        email:
+          type: string
+        reason:
+          type: string
+
+    BulkDirectUserResult:
+      type: object
+      properties:
+        total:
+          type: integer
+        created_count:
+          type: integer
+        failed_count:
+          type: integer
+        created_users:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDirectUserCredential'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDirectUserFailure'
+
     WebAuthnCredential:
       type: object
       properties:
@@ -1566,6 +1648,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BulkInviteResult'
+        '400':
+          description: 不正なリクエストボディ
+        '403':
+          description: 権限不足
+
+  /users/bulk-direct:
+    post:
+      summary: 複数ユーザーの一括直接登録（manage_system権限必須・仮パスワード発行）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDirectUserRequest'
+      responses:
+        '200':
+          description: 一括登録結果（作成ユーザー情報・仮パスワード一覧および失敗理由一覧）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDirectUserResult'
         '400':
           description: 不正なリクエストボディ
         '403':

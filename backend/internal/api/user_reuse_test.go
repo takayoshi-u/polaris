@@ -228,12 +228,12 @@ func (s *reuseMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		// GetUserByID
 		uID := fmt.Sprintf("%v", args[0])
 		u, ok := st.users[uID]
-		cols := []string{"id", "email", "password_hash", "google_sub", "display_name", "avatar_url", "status", "mfa_enabled", "mfa_enforced", "created_at", "updated_at"}
+		cols := []string{"id", "email", "password_hash", "google_sub", "display_name", "avatar_url", "status", "mfa_enabled", "mfa_enforced", "must_change_password", "created_at", "updated_at"}
 		if !ok {
 			return &mockRows{cols: cols, rows: nil}, nil
 		}
 		return &mockRows{cols: cols, rows: [][]driver.Value{{
-			u.ID, u.Email, u.PasswordHash, nil, u.DisplayName, u.AvatarURL, u.Status, u.MFAEnabled, u.MFAEnforced, u.CreatedAt, u.UpdatedAt,
+			u.ID, u.Email, u.PasswordHash, nil, u.DisplayName, u.AvatarURL, u.Status, u.MFAEnabled, u.MFAEnforced, false, u.CreatedAt, u.UpdatedAt,
 		}}}, nil
 
 	case strings.Contains(q, "user_sessions") && strings.Contains(q, "token_hash"):
@@ -551,13 +551,13 @@ func TestUserEmailReuse_DatabaseIntegration(t *testing.T) {
 	passB := "UserPassB456!"
 
 	// 1. Create User A directly
-	userA, err := st.CreateUserDirect(ctx, targetEmail, "User A", passA, nil, nil)
+	userA, err := st.CreateUserDirect(ctx, targetEmail, "User A", passA, false, nil, nil)
 	if err != nil {
 		t.Fatalf("create user A failed: %v", err)
 	}
 
 	// 2. Duplicate while active -> must fail
-	_, err = st.CreateUserDirect(ctx, targetEmail, "User A Dup", "PassDup123!", nil, nil)
+	_, err = st.CreateUserDirect(ctx, targetEmail, "User A Dup", "PassDup123!", false, nil, nil)
 	if err == nil {
 		t.Fatalf("expected conflict error on duplicate active user, got nil")
 	}
@@ -578,7 +578,7 @@ func TestUserEmailReuse_DatabaseIntegration(t *testing.T) {
 	}
 
 	// 5. Create User B with same email -> must succeed with new ID
-	userB, err := st.CreateUserDirect(ctx, targetEmail, "User B", passB, nil, nil)
+	userB, err := st.CreateUserDirect(ctx, targetEmail, "User B", passB, false, nil, nil)
 	if err != nil {
 		t.Fatalf("create user B with reused email failed: %v", err)
 	}

@@ -395,13 +395,13 @@ func (s *mfaMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		}}}, nil
 
 	case strings.Contains(q, "FROM users WHERE id = $1") && strings.Contains(q, "SELECT id, email, password_hash"):
-		cols := []string{"id", "email", "password_hash", "google_sub", "display_name", "avatar_url", "status", "mfa_enabled", "mfa_enforced", "created_at", "updated_at"}
+		cols := []string{"id", "email", "password_hash", "google_sub", "display_name", "avatar_url", "status", "mfa_enabled", "mfa_enforced", "must_change_password", "created_at", "updated_at"}
 		var gSub any = nil
 		if st.user.GoogleSub != nil {
 			gSub = *st.user.GoogleSub
 		}
 		return &mockRows{cols: cols, rows: [][]driver.Value{{
-			st.user.ID, st.user.Email, st.passwordHash, gSub, st.user.DisplayName, st.user.AvatarURL, st.user.Status, st.user.MFAEnabled, st.user.MFAEnforced, st.user.CreatedAt, st.user.UpdatedAt,
+			st.user.ID, st.user.Email, st.passwordHash, gSub, st.user.DisplayName, st.user.AvatarURL, st.user.Status, st.user.MFAEnabled, st.user.MFAEnforced, st.user.MustChangePassword, st.user.CreatedAt, st.user.UpdatedAt,
 		}}}, nil
 
 	case strings.Contains(q, "SELECT mfa_enforced, totp_secret") && strings.Contains(q, "FROM users WHERE id = $1"):

@@ -469,7 +469,7 @@ func TestWebhookTenantBoundary(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&projB)
 
 	// Create second user (PM of Project A ONLY)
-	userA, err := rig.st.CreateUserDirect(context.Background(), "user-a@example.com", "User A (Project A Admin)", "Password123!", nil, nil)
+	userA, err := rig.st.CreateUserDirect(context.Background(), "user-a@example.com", "User A (Project A Admin)", "Password123!", false, nil, nil)
 	if err != nil {
 		t.Fatalf("create user A: %v", err)
 	}
@@ -564,15 +564,15 @@ func TestPATLifecycleAndPermissions(t *testing.T) {
 
 	// 2. Create users with different roles:
 	// - Editor user
-	editorUser, _ := rig.st.CreateUserDirect(context.Background(), "editor@example.com", "Editor 佐藤", "Password123!", nil, nil)
+	editorUser, _ := rig.st.CreateUserDirect(context.Background(), "editor@example.com", "Editor 佐藤", "Password123!", false, nil, nil)
 	_, _ = rig.st.UpsertProjectMember(context.Background(), proj.ID, "user", editorUser.ID, domain.RoleEditor)
 
 	// - Viewer user
-	viewerUser, _ := rig.st.CreateUserDirect(context.Background(), "viewer@example.com", "Viewer 田中", "Password123!", nil, nil)
+	viewerUser, _ := rig.st.CreateUserDirect(context.Background(), "viewer@example.com", "Viewer 田中", "Password123!", false, nil, nil)
 	_, _ = rig.st.UpsertProjectMember(context.Background(), proj.ID, "user", viewerUser.ID, domain.RoleViewer)
 
 	// - Non-member user
-	nonMemberUser, _ := rig.st.CreateUserDirect(context.Background(), "nonmember@example.com", "NonMember 山本", "Password123!", nil, nil)
+	nonMemberUser, _ := rig.st.CreateUserDirect(context.Background(), "nonmember@example.com", "NonMember 山本", "Password123!", false, nil, nil)
 
 	// Generate PAT for each user
 	createPAT := func(userID, tokenName string, scopes []string, expiresAt *time.Time) string {

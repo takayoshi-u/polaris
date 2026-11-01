@@ -912,6 +912,87 @@
       </div>
     </div>
 
+    <!-- Forced Password Change Blocking Modal (Requirement 3) -->
+    <div
+      v-if="currentUser?.must_change_password"
+      class="modal-backdrop"
+      style="z-index: 9999; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(4px);"
+    >
+      <div class="modal-panel" style="max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+          <div style="width: 38px; height: 38px; border-radius: 8px; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 18px;">
+            🔐
+          </div>
+          <div>
+            <h3 style="font-size: 16px; font-weight: 700; margin: 0;">初期パスワードの変更が必要です</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin: 2px 0 0 0;">
+              管理者によって仮パスワードで登録されています。セキュリティ保護のため、新しいパスワードを設定してください。
+            </p>
+          </div>
+        </div>
+
+        <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitForcedPasswordChange">
+          <div>
+            <label class="field-label">現在の仮パスワード *</label>
+            <input
+              v-model="forcedPwdForm.current_password"
+              type="password"
+              required
+              style="width: 100%;"
+              placeholder="仮パスワードを入力"
+            />
+          </div>
+
+          <div>
+            <label class="field-label">新しいパスワード（8文字以上） *</label>
+            <input
+              v-model="forcedPwdForm.new_password"
+              type="password"
+              minlength="8"
+              required
+              style="width: 100%;"
+              placeholder="新しいパスワード（8文字以上）"
+            />
+          </div>
+
+          <div>
+            <label class="field-label">新しいパスワード（確認） *</label>
+            <input
+              v-model="forcedPwdForm.confirm_password"
+              type="password"
+              minlength="8"
+              required
+              style="width: 100%;"
+              placeholder="確認のため再入力"
+            />
+          </div>
+
+          <div v-if="forcedPwdError" style="font-size: 12px; color: var(--danger); font-weight: 600;">
+            {{ forcedPwdError }}
+          </div>
+
+          <div style="margin-top: 4px;">
+            <button
+              type="submit"
+              class="btn btn-primary"
+              style="width: 100%; justify-content: center;"
+              :disabled="isSubmittingForcedPwd"
+            >
+              {{ isSubmittingForcedPwd ? '変更中...' : 'パスワードを変更して利用開始' }}
+            </button>
+          </div>
+        </form>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 14px;">
+          <span style="font-size: 11px; color: var(--text-muted);">変更完了まで他の操作は行えません</span>
+          <button type="button" class="btn btn-secondary btn-sm" style="color: var(--danger);" @click="openLogoutModal">
+            <LogOut :size="14" />
+            <span>ログアウト</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Logout Confirmation Modal (Requirement 3) -->
     <div
       v-if="showLogoutModal"
@@ -1453,6 +1534,68 @@ async function requestEmailChange() {
     notifyToast('確認メールを新しいメールアドレス宛に送信しました（1時間有効）', 'success')
   } catch (e: any) {
     notifyToast(e.message, 'error')
+  }
+}
+
+const forcedPwdForm = reactive({
+  current_password: '',
+  new_password: '',
+  confirm_password: ''
+})
+const forcedPwdError = ref('')
+const isSubmittingForcedPwd = ref(false)
+
+async function submitForcedPasswordChange() {
+  forcedPwdError.value = ''
+  if (!forcedPwdForm.current_password) {
+    forcedPwdError.value = '現在の仮パスワードを入力してください'
+    return
+  }
+  if (forcedPwdForm.new_password.length < 8) {
+    forcedPwdError.value = '新しいパスワードは8文字以上で入力してください'
+    return
+  }
+  if (forcedPwdForm.new_password !== forcedPwdForm.confirm_password) {
+    forcedPwdError.value = '新しいパスワードが一致しません'
+    return
+  }
+
+  isSubmittingForcedPwd.value = true
+  try {
+    try {
+      await apiFetch('/users/me/password', {
+        method: 'PUT',
+        body: JSON.stringify({
+          current_password: forcedPwdForm.current_password,
+          new_password: forcedPwdForm.new_password
+        })
+      })
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404 || e?.message?.includes('404')) {
+        await apiFetch('/auth/me/password', {
+          method: 'PUT',
+          body: JSON.stringify({
+            current_password: forcedPwdForm.current_password,
+            new_password: forcedPwdForm.new_password
+          })
+        })
+      } else {
+        throw e
+      }
+    }
+    if (currentUser.value) {
+      currentUser.value.must_change_password = false
+    }
+    forcedPwdForm.current_password = ''
+    forcedPwdForm.new_password = ''
+    forcedPwdForm.confirm_password = ''
+    await refreshCurrentUser()
+    notifyToast('パスワードを更新しました', 'success')
+  } catch (err: any) {
+    forcedPwdError.value = err.message || 'パスワードの変更に失敗しました'
+    notifyToast(err.message || 'パスワードの変更に失敗しました', 'error')
+  } finally {
+    isSubmittingForcedPwd.value = false
   }
 }
 

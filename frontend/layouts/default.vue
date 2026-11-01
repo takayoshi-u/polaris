@@ -285,7 +285,7 @@
     </div>
 
     <!-- New Project Modal -->
-    <div v-if="showNewProjectModal" class="modal-backdrop" @click.self="showNewProjectModal = false">
+    <div v-if="showNewProjectModal" class="modal-backdrop" v-backdrop-dismiss="() => showNewProjectModal = false">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">新規プロジェクト作成</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createNewProject">
@@ -310,7 +310,7 @@
     </div>
 
     <!-- Account Settings Modal -->
-    <div v-if="showAccountModal && currentUser" class="modal-backdrop" @click.self="showAccountModal = false">
+    <div v-if="showAccountModal && currentUser" class="modal-backdrop" v-backdrop-dismiss="() => showAccountModal = false">
       <div class="modal-panel" style="max-width: 560px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -740,7 +740,7 @@
     </div>
 
     <!-- Backup Codes Display Modal -->
-    <div v-if="showBackupCodesModal" class="modal-backdrop" @click.self="showBackupCodesModal = false">
+    <div v-if="showBackupCodesModal" class="modal-backdrop" v-backdrop-dismiss="() => showBackupCodesModal = false">
       <div class="modal-panel" style="max-width: 480px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">🎫 バックアップコードが発行されました</h3>
         <p style="font-size: 12px; color: var(--danger); margin-bottom: 12px; font-weight: 600;">
@@ -769,7 +769,7 @@
     </div>
 
     <!-- Disable TOTP Password Prompt Modal -->
-    <div v-if="showDisableTotpModal" class="modal-backdrop" @click.self="showDisableTotpModal = false">
+    <div v-if="showDisableTotpModal" class="modal-backdrop" v-backdrop-dismiss="() => showDisableTotpModal = false">
       <div class="modal-panel" style="max-width: 420px;">
         <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 8px;">認証アプリ (TOTP) の無効化</h3>
         <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
@@ -998,7 +998,7 @@
       v-if="showLogoutModal"
       class="modal-backdrop"
       style="z-index: 10000;"
-      @click.self="!isLoggingOut && (showLogoutModal = false)"
+      v-backdrop-dismiss="() => !isLoggingOut && (showLogoutModal = false)"
     >
       <div class="modal-panel" style="max-width: 400px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">

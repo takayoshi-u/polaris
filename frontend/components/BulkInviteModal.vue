@@ -10,7 +10,7 @@
       justify-content: center;
       padding: 16px;
     "
-    @click.self="$emit('close')"
+    v-backdrop-dismiss="() => $emit('close')"
   >
     <div
       class="card"

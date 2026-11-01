@@ -1086,7 +1086,7 @@
     </div>
 
     <!-- System Webhook Create Modal -->
-    <div v-if="showSysWebhookModal" class="modal-backdrop" @click.self="showSysWebhookModal = false">
+    <div v-if="showSysWebhookModal" class="modal-backdrop" v-backdrop-dismiss="() => showSysWebhookModal = false">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">新規全体 Webhook の登録</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="createSysWebhook">
@@ -1144,7 +1144,7 @@
     </div>
 
     <!-- System Webhook Deliveries Modal -->
-    <div v-if="selectedSysWebhookForLogs" class="modal-backdrop" @click.self="selectedSysWebhookForLogs = null">
+    <div v-if="selectedSysWebhookForLogs" class="modal-backdrop" v-backdrop-dismiss="() => selectedSysWebhookForLogs = null">
       <div class="modal-panel" style="max-width: 680px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
           <h3 style="font-size: 15px; font-weight: 700;">配信ログ: {{ selectedSysWebhookForLogs.name }}</h3>
@@ -1194,7 +1194,7 @@
     </div>
 
     <!-- System Webhook Edit Modal -->
-    <div v-if="editingSysWebhook" class="modal-backdrop" @click.self="editingSysWebhook = null">
+    <div v-if="editingSysWebhook" class="modal-backdrop" v-backdrop-dismiss="() => editingSysWebhook = null">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">全体 Webhook の編集</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="updateSysWebhook">
@@ -1232,7 +1232,7 @@
     </div>
 
     <!-- SMTP Error Detail Modal -->
-    <div v-if="smtpErrorDetail" class="modal-backdrop" @click.self="smtpErrorDetail = null">
+    <div v-if="smtpErrorDetail" class="modal-backdrop" v-backdrop-dismiss="() => smtpErrorDetail = null">
       <div class="modal-panel" style="max-width: 500px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
           <h3 style="font-size: 15px; font-weight: 700; color: var(--danger); display: flex; align-items: center; gap: 6px;">
@@ -1261,7 +1261,7 @@
     </div>
 
     <!-- Group Rename Modal -->
-    <div v-if="renamingGroup" class="modal-backdrop" @click.self="renamingGroup = null">
+    <div v-if="renamingGroup" class="modal-backdrop" v-backdrop-dismiss="() => renamingGroup = null">
       <div class="modal-panel" style="max-width: 400px;">
         <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">グループ名の変更</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitRenameGroup">
@@ -1282,7 +1282,7 @@
       v-if="previewGroup"
       class="modal-backdrop"
       style="z-index: 250;"
-      @click.self="previewGroup = null"
+      v-backdrop-dismiss="() => previewGroup = null"
     >
       <div
         class="card"
@@ -1477,7 +1477,7 @@
     </div>
 
     <!-- Edit System Type Modal -->
-    <div v-if="editingSysType" class="modal-backdrop" @click.self="editingSysType = null">
+    <div v-if="editingSysType" class="modal-backdrop" v-backdrop-dismiss="() => editingSysType = null">
       <div class="modal-panel" style="max-width: 480px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
           <h3 style="font-size: 16px; font-weight: 700;">共通種別の編集</h3>

@@ -525,7 +525,7 @@
         justify-content: center;
         padding: 16px;
       "
-      @click.self="modalOpen = false"
+      v-backdrop-dismiss="() => modalOpen = false"
     >
       <div class="card" style="width: 100%; max-width: 480px; padding: 20px; display: flex; flex-direction: column; gap: 14px;">
         <h3 style="font-size: 16px; font-weight: 700;">

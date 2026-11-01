@@ -138,7 +138,7 @@
         justify-content: center;
         padding: 16px;
       "
-      @click.self="selectedCellModal = null"
+      v-backdrop-dismiss="() => selectedCellModal = null"
     >
       <div class="card" style="width: 100%; max-width: 520px; padding: 20px; display: flex; flex-direction: column; gap: 14px;">
         <!-- Popover Header -->

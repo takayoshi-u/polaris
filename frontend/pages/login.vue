@@ -162,7 +162,7 @@
     </div>
 
     <!-- Password Reset Request Modal -->
-    <div v-if="showResetModal" class="modal-backdrop" @click.self="showResetModal = false">
+    <div v-if="showResetModal" class="modal-backdrop" v-backdrop-dismiss="() => showResetModal = false">
       <div class="modal-panel" style="max-width: 420px;">
         <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 10px;">パスワード再設定メールの送信</h3>
         <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">

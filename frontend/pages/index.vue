@@ -128,7 +128,7 @@
     </div>
 
     <!-- Create Project Modal (P-9) -->
-    <div v-if="showCreateProjectModal" class="modal-backdrop" @click.self="showCreateProjectModal = false">
+    <div v-if="showCreateProjectModal" class="modal-backdrop" v-backdrop-dismiss="() => showCreateProjectModal = false">
       <div class="modal-panel" style="max-width: 520px;">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">新規プロジェクト作成</h3>
         <form style="display: flex; flex-direction: column; gap: 12px;" @submit.prevent="submitCreateProject">
@@ -155,7 +155,7 @@
     </div>
 
     <!-- Safety Confirmation Modal with Key/Name Input & Impact Summary (A-2) -->
-    <div v-if="deleteSafetyProject" class="modal-backdrop" @click.self="deleteSafetyProject = null">
+    <div v-if="deleteSafetyProject" class="modal-backdrop" v-backdrop-dismiss="() => deleteSafetyProject = null">
       <div class="modal-panel" style="max-width: 500px;">
         <h3 style="font-size: 16px; font-weight: 700; color: var(--danger); margin-bottom: 10px;">
           ⚠️ プロジェクトの安全削除確認

@@ -323,3 +323,32 @@ test('project page sends sprint_duration_days and passes it to SprintBoardView',
   assert.match(src, /body:\s*JSON\.stringify\(projForm\)/)
   assert.match(src, /:sprint-duration-days="project\?\.sprint_duration_days \|\| 14"/)
 })
+
+test('ItemDetailModal unifies title display and inline edit in header, eliminating duplicate template input', () => {
+  const modalSrc = fs.readFileSync(path.join(__dirname, '../components/ItemDetailModal.vue'), 'utf8')
+  const cssSrc = fs.readFileSync(path.join(__dirname, '../assets/css/main.css'), 'utf8')
+
+  // Header inline title input when editable (based on isKeyEditable('title') and canEditAny)
+  assert.ok(modalSrc.includes('ref="titleInputRef"'), 'titleInputRef must be defined on header title input')
+  assert.ok(modalSrc.includes('v-model="form.title"'), 'form.title must be bound via v-model in header')
+  assert.ok(modalSrc.includes('unified-title-input'), 'unified-title-input class must be used')
+  assert.ok(modalSrc.includes('placeholder="タイトルを入力..."'), 'Header title input must have proper placeholder')
+  assert.ok(modalSrc.includes("isKeyEditable('title')"), 'isKeyEditable title check must be present')
+  assert.ok(modalSrc.includes('focusTitleInput'), 'focusTitleInput helper must be implemented')
+  assert.ok(modalSrc.includes('unified-title-heading'), 'unified-title-heading must be used for view-only state')
+
+  // Template grid avoids duplicate text input and renders indicator with focus action
+  assert.ok(
+    modalSrc.includes('※ タイトルは最上部のヘッダーで直接編集できます'),
+    'Template grid must contain header title redirection notice'
+  )
+  assert.ok(
+    !modalSrc.includes('field.field_key === \'title\'">\n              <input v-model="form.title"'),
+    'Duplicate title text input in template grid must be removed'
+  )
+
+  // Styling for unified title input
+  assert.ok(cssSrc.includes('.unified-title-input'), 'main.css must contain .unified-title-input styling')
+  assert.ok(cssSrc.includes('.unified-title-input:hover'), 'main.css must contain hover styling')
+  assert.ok(cssSrc.includes('.unified-title-input:focus'), 'main.css must contain focus styling')
+})

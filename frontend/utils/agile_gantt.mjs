@@ -22,6 +22,81 @@ export function formatLocalYMD(date = new Date()) {
 }
 
 /**
+ * Adds `days` to a YYYY-MM-DD date string using UTC date math and returns a new YYYY-MM-DD string.
+ */
+export function addDaysYMD(ymdStr, days) {
+  if (!ymdStr || typeof ymdStr !== 'string') return ''
+  const parts = ymdStr.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return ymdStr
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
+  dt.setUTCDate(dt.getUTCDate() + (Number(days) || 0))
+  const y = dt.getUTCFullYear()
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(dt.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/** True only for real calendar dates in YYYY-MM-DD form. */
+export function isValidYMD(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const [y, m, d] = v.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+}
+
+/**
+ * Computes sprint end_date from start_date and sprintDurationDays (inclusive range: start + duration - 1 days).
+ */
+export function calculateSprintEndDateFromStart(startDateYMD, sprintDurationDays = 14) {
+  if (!isValidYMD(startDateYMD)) {
+    return ''
+  }
+  const duration = Math.max(1, Math.min(90, Math.round(Number(sprintDurationDays) || 14)))
+  return addDaysYMD(String(startDateYMD), duration - 1)
+}
+
+/**
+ * Computes default start_date (max(end_date) + 1 day, or todayYMD if none),
+ * end_date (start_date + duration - 1 days), and suggested_name for a new sprint.
+ */
+export function calculateDefaultSprintDates(sprints = [], sprintDurationDays = 14, todayYMD = formatLocalYMD()) {
+  const duration = Math.max(1, Math.min(90, Math.round(Number(sprintDurationDays) || 14)))
+  const list = Array.isArray(sprints) ? sprints : []
+
+  let maxEndDate = ''
+  let maxN = list.length
+
+  for (const sp of list) {
+    if (sp && isValidYMD(sp.end_date)) {
+      if (!maxEndDate || sp.end_date > maxEndDate) {
+        maxEndDate = sp.end_date
+      }
+    }
+    if (sp && typeof sp.name === 'string') {
+      const m = sp.name.match(/sprint\s*(\d+)/i)
+      if (m) {
+        const n = parseInt(m[1], 10)
+        if (!Number.isNaN(n) && n > maxN) {
+          maxN = n
+        }
+      }
+    }
+  }
+
+  const fallbackStart = isValidYMD(String(todayYMD)) ? String(todayYMD) : formatLocalYMD()
+  const start_date = maxEndDate ? addDaysYMD(maxEndDate, 1) : fallbackStart
+  const end_date = addDaysYMD(start_date, duration - 1)
+  const suggested_name = `Sprint ${maxN + 1}`
+
+  return {
+    start_date,
+    end_date,
+    suggested_name,
+    duration_days: duration
+  }
+}
+
+/**
  * Checks whether a status name represents a completed/done state.
  * Matches '完了', 'クローズ', 'done', 'closed', or exact 'close'.
  * Does NOT match words like 'disclosed' or 'enclosure'.

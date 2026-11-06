@@ -145,6 +145,7 @@ erDiagram
         varchar name
         text description
         numeric hours_per_day "NUMERIC(4,2) 1.00〜24.00 (小数第2位まで)"
+        integer sprint_duration_days "デフォルトスプリント期間(日, 1〜90, 初期値14)"
         uuid default_issue_template_id
         uuid default_task_template_id
         uuid created_by FK

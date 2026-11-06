@@ -263,6 +263,35 @@ func (s *Store) ListSprints(ctx context.Context, projectID string) ([]domain.Spr
 	return sprints, nil
 }
 
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// computeDefaultSprintDates returns the default (start, end) dates for a new sprint:
+// start = max(end_date)+1 day of the project's sprints, or today in JST when no sprint has an end_date.
+// Note: "today" here is the server's JST date, whereas the frontend new-sprint modal uses the browser's
+// local date, so the two may differ for users outside JST around midnight.
+// Note: rollover auto-creation names the sprint "Sprint max(N, count)+1" (the larger of the max numeric
+// suffix+1 and the sprint count+1), which can differ from the frontend's max(N)+1 naming.
+func (s *Store) computeDefaultSprintDates(ctx context.Context, q rowQuerier, projectID string, durationDays int) (string, string, error) {
+	if durationDays < 1 {
+		durationDays = 14
+	}
+	var maxEnd sql.NullTime
+	// MAX over no rows yields a single NULL row; only sql.ErrNoRows is tolerated, other errors propagate.
+	if err := q.QueryRowContext(ctx, `SELECT MAX(end_date) FROM sprints WHERE project_id = $1 AND end_date IS NOT NULL`, projectID).Scan(&maxEnd); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", "", err
+	}
+	var startDt time.Time
+	if maxEnd.Valid {
+		startDt = maxEnd.Time.AddDate(0, 0, 1)
+	} else {
+		startDt = time.Now().In(time.FixedZone("JST", 9*3600))
+	}
+	endDt := startDt.AddDate(0, 0, durationDays-1)
+	return startDt.Format("2006-01-02"), endDt.Format("2006-01-02"), nil
+}
+
 func (s *Store) CreateSprint(ctx context.Context, projectID, actorUserID string, in SprintCreateInput) (*domain.Sprint, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -503,10 +532,10 @@ func (s *Store) UpdateSprint(ctx context.Context, sprintID, actorUserID string, 
 						nextNum = count + 1
 					}
 					newName := fmt.Sprintf("Sprint %d", nextNum)
-					jst := time.FixedZone("JST", 9*3600)
-					nowJST := time.Now().In(jst)
-					newStart := nowJST.Format("2006-01-02")
-					newEnd := nowJST.AddDate(0, 0, 14).Format("2006-01-02")
+					newStart, newEnd, err := s.computeDefaultSprintDates(ctx, tx, sp.ProjectID, proj.SprintDurationDays)
+					if err != nil {
+						return nil, err
+					}
 					targetSprintID = id.NewV7String()
 					if _, err := tx.ExecContext(ctx, `
 						INSERT INTO sprints (id, project_id, name, goal, start_date, end_date, status, created_at, updated_at)

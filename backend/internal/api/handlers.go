@@ -844,15 +844,16 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		HoursPerDay *float64 `json:"hours_per_day"`
+		Name               string   `json:"name"`
+		Description        string   `json:"description"`
+		HoursPerDay        *float64 `json:"hours_per_day"`
+		SprintDurationDays *int     `json:"sprint_duration_days"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
-	p, err := s.store.CreateProject(r.Context(), currentUser(r).ID, body.Name, body.Description, body.HoursPerDay)
+	p, err := s.store.CreateProject(r.Context(), currentUser(r).ID, body.Name, body.Description, body.HoursPerDay, body.SprintDurationDays)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -885,6 +886,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		Name                   string  `json:"name"`
 		Description            string  `json:"description"`
 		HoursPerDay            float64 `json:"hours_per_day"`
+		SprintDurationDays     *int    `json:"sprint_duration_days"`
 		DefaultIssueTemplateID *string `json:"default_issue_template_id"`
 		DefaultTaskTemplateID  *string `json:"default_task_template_id"`
 	}
@@ -892,7 +894,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 		return
 	}
-	p, err := s.store.UpdateProject(r.Context(), r.PathValue("projectId"), currentUser(r).ID, body.Name, body.Description, body.HoursPerDay, body.DefaultIssueTemplateID, body.DefaultTaskTemplateID)
+	p, err := s.store.UpdateProject(r.Context(), r.PathValue("projectId"), currentUser(r).ID, body.Name, body.Description, body.HoursPerDay, body.DefaultIssueTemplateID, body.DefaultTaskTemplateID, body.SprintDurationDays)
 	if err != nil {
 		writeError(w, err)
 		return

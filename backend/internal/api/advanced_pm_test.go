@@ -857,7 +857,7 @@ func TestAgileEnhancements_PremortemPostmortemAndSprintFilter(t *testing.T) {
 	srv := rig.srv
 	cookie := rig.adminCookie
 
-	// 1. Create Project
+	// 1. Create Project (default sprint_duration_days = 14)
 	projBody, _ := json.Marshal(map[string]any{
 		"name":          "Agile Enhancements Project",
 		"description":   "Testing premortem/postmortem, sprint filters, and story point rollups",
@@ -872,6 +872,45 @@ func TestAgileEnhancements_PremortemPostmortemAndSprintFilter(t *testing.T) {
 	}
 	var proj domain.Project
 	_ = json.NewDecoder(rec.Body).Decode(&proj)
+	if proj.SprintDurationDays != 14 {
+		t.Fatalf("expected default sprint_duration_days 14, got %d", proj.SprintDurationDays)
+	}
+
+	// Update sprint_duration_days to 7 and verify GET round-trip
+	upProjBody, _ := json.Marshal(map[string]any{
+		"name":                 proj.Name,
+		"description":          proj.Description,
+		"hours_per_day":        proj.HoursPerDay,
+		"sprint_duration_days": 7,
+	})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s", proj.ID), bytes.NewReader(upProjBody))
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed to update project sprint_duration_days (%d): %s", rec.Code, rec.Body.String())
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&proj)
+	if proj.SprintDurationDays != 7 {
+		t.Fatalf("expected updated sprint_duration_days 7, got %d", proj.SprintDurationDays)
+	}
+
+	// Invalid sprint_duration_days (0 or 95 -> 400 Bad Request)
+	for _, invalidDur := range []int{0, 95} {
+		invBody, _ := json.Marshal(map[string]any{
+			"name":                 proj.Name,
+			"description":          proj.Description,
+			"hours_per_day":        proj.HoursPerDay,
+			"sprint_duration_days": invalidDur,
+		})
+		req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/projects/%s", proj.ID), bytes.NewReader(invBody))
+		req.AddCookie(cookie)
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for sprint_duration_days=%d, got %d", invalidDur, rec.Code)
+		}
+	}
 
 	// Fetch statuses (first = todo, last = done)
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/statuses", proj.ID), nil)
@@ -995,8 +1034,10 @@ func TestAgileEnhancements_PremortemPostmortemAndSprintFilter(t *testing.T) {
 
 	// 3. Create Active Sprint & Planned Sprint
 	spActiveBody, _ := json.Marshal(map[string]any{
-		"name":   "Active Sprint 1",
-		"status": "active",
+		"name":       "Active Sprint 1",
+		"status":     "active",
+		"start_date": "2026-11-01",
+		"end_date":   "2026-11-07",
 	})
 	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/sprints", proj.ID), bytes.NewReader(spActiveBody))
 	req.AddCookie(cookie)
@@ -1203,6 +1244,20 @@ func TestAgileEnhancements_PremortemPostmortemAndSprintFilter(t *testing.T) {
 		t.Fatalf("expected Task D moved to new planned sprint, got %v", movedTaskD.SprintID)
 	}
 	nextSprintID := *movedTaskD.SprintID
+
+	// Verify auto-created sprint dates: start = max(end_date)+1 = 2026-11-08, end = start+(7-1) = 2026-11-14
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sprints/%s", nextSprintID), nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var autoCreatedSprint domain.Sprint
+	_ = json.NewDecoder(rec.Body).Decode(&autoCreatedSprint)
+	if autoCreatedSprint.StartDate == nil || *autoCreatedSprint.StartDate != "2026-11-08" {
+		t.Fatalf("expected auto-created sprint start_date 2026-11-08, got %v", autoCreatedSprint.StartDate)
+	}
+	if autoCreatedSprint.EndDate == nil || *autoCreatedSprint.EndDate != "2026-11-14" {
+		t.Fatalf("expected auto-created sprint end_date 2026-11-14 (7-day duration), got %v", autoCreatedSprint.EndDate)
+	}
 
 	// Close the new sprint with rollover_action="backlog" -> Task D becomes unassigned (sprint_id=nil)
 	closeBacklogBody, _ := json.Marshal(map[string]any{

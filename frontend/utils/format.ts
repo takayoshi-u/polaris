@@ -2,6 +2,8 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import {
   buildGanttHeaderGroups as _buildGanttHeaderGroups,
+  calculateDefaultSprintDates as _calculateDefaultSprintDates,
+  calculateSprintEndDateFromStart as _calculateSprintEndDateFromStart,
   calculateSprintMetrics as _calculateSprintMetrics,
   calculateVelocityStats as _calculateVelocityStats,
   formatLocalYMD as _formatLocalYMD,
@@ -859,6 +861,35 @@ export function buildGanttHeaderGroups(
   dayWidth?: number
 ): GanttScaleHeaderResult {
   return _buildGanttHeaderGroups(timelineDays, scale, dayWidth)
+}
+
+export interface DefaultSprintDatesResult {
+  start_date: string
+  end_date: string
+  suggested_name: string
+  duration_days: number
+}
+
+/**
+ * Computes sprint end_date from start_date and sprintDurationDays (inclusive range: start + duration - 1 days).
+ */
+export function calculateSprintEndDateFromStart(
+  startDateYMD: string,
+  sprintDurationDays = 14
+): string {
+  return _calculateSprintEndDateFromStart(startDateYMD, sprintDurationDays)
+}
+
+/**
+ * Computes default start_date (max(end_date) + 1 day, or todayYMD if none),
+ * end_date (start_date + duration - 1 days), and suggested_name for a new sprint.
+ */
+export function calculateDefaultSprintDates(
+  sprints: { name?: string | null; end_date?: string | null }[] = [],
+  sprintDurationDays = 14,
+  todayYMD?: string
+): DefaultSprintDatesResult {
+  return _calculateDefaultSprintDates(sprints, sprintDurationDays, todayYMD)
 }
 
 

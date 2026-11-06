@@ -902,6 +902,7 @@
         :all-tasks="allTasks"
         :statuses="statuses"
         :can-edit="canEditProjectItems"
+        :sprint-duration-days="project?.sprint_duration_days || 14"
         @open-task="openTaskDetailStandalone"
         @refresh="refreshAllWorkspace"
       />
@@ -959,6 +960,10 @@
           <div>
             <label class="field-label">1日あたりの基準時間 (h)</label>
             <input v-model.number="projForm.hours_per_day" type="number" min="1" max="24" step="0.01" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">デフォルトスプリント期間 (日)</label>
+            <input v-model.number="projForm.sprint_duration_days" type="number" min="1" max="90" step="1" required style="width: 100%;" />
           </div>
           <div>
             <label class="field-label">デフォルト課題テンプレート</label>
@@ -2202,6 +2207,7 @@ const projForm = reactive({
   name: '',
   description: '',
   hours_per_day: 8.0,
+  sprint_duration_days: 14,
   default_issue_template_id: '' as string | null,
   default_task_template_id: '' as string | null
 })
@@ -2541,6 +2547,7 @@ async function loadWorkspace() {
     projForm.name = p.name
     projForm.description = p.description
     projForm.hours_per_day = p.hours_per_day
+    projForm.sprint_duration_days = p.sprint_duration_days || 14
     projForm.default_issue_template_id = p.default_issue_template_id || null
     projForm.default_task_template_id = p.default_task_template_id || null
 

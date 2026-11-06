@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(255) NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     hours_per_day NUMERIC(4,2) NOT NULL DEFAULT 8.00 CHECK (hours_per_day >= 1.00 AND hours_per_day <= 24.00),
+    sprint_duration_days INTEGER NOT NULL DEFAULT 14 CHECK (sprint_duration_days >= 1 AND sprint_duration_days <= 90),
     default_issue_template_id UUID,
     default_task_template_id UUID,
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -507,4 +508,4 @@ WHERE NOT EXISTS (SELECT 1 FROM types WHERE project_id IS NULL AND name = 'æ”¹å–
 
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS premortem TEXT NOT NULL DEFAULT '';
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS postmortem TEXT NOT NULL DEFAULT '';
-
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS sprint_duration_days INTEGER NOT NULL DEFAULT 14 CHECK (sprint_duration_days >= 1 AND sprint_duration_days <= 90);

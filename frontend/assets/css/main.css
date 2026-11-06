@@ -771,6 +771,41 @@ input[type="range"]:disabled::-moz-range-thumb {
   scrollbar-color: var(--border-color) var(--bg-elevated);
 }
 
+/* Unified Title Input & Heading in ItemDetailModal */
+input.unified-title-input,
+.unified-title-input {
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  width: 100% !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  background-color: transparent !important;
+  color: var(--text-main) !important;
+  line-height: 1.3 !important;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+input.unified-title-input:hover,
+.unified-title-input:hover {
+  border-color: var(--border-color) !important;
+  background-color: var(--bg-input) !important;
+}
+
+input.unified-title-input:focus,
+.unified-title-input:focus {
+  border-color: var(--primary) !important;
+  background-color: var(--bg-input) !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
+  outline: none !important;
+}
+
+.unified-title-heading {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
 
 
 

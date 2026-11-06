@@ -111,7 +111,7 @@
     <div class="card" style="display: flex; flex-direction: column; gap: 18px; padding: 20px;">
       <!-- Title Card Header -->
       <div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 14px;">
-        <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 260px;">
           <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted);">
             <span :class="['badge', targetType === 'issue' ? 'badge-green' : 'badge-blue']">
               {{ targetType === 'issue' ? '課題 (Issue)' : 'タスク (Task)' }}
@@ -135,7 +135,21 @@
               IDをコピー
             </button>
           </div>
-          <h2 style="font-size: 20px; font-weight: 700;">{{ form.title || '(無題)' }}</h2>
+          <input
+            v-if="canEditAny && isKeyEditable('title')"
+            ref="titleInputRef"
+            v-model="form.title"
+            type="text"
+            class="unified-title-input"
+            placeholder="タイトルを入力..."
+          />
+          <h2
+            v-else
+            class="unified-title-heading"
+            style="font-size: 20px; font-weight: 700; margin: 0; padding: 4px 8px; color: var(--text-main);"
+          >
+            {{ form.title || '(無題)' }}
+          </h2>
         </div>
 
         <!-- Tab Switcher: Details vs History -->
@@ -231,9 +245,24 @@
               {{ getFieldPlaceholder(field) }}
             </div>
 
-            <!-- Standard Field: title -->
-            <div v-else-if="field.field_source === 'standard' && field.field_key === 'title'">
-              <input v-model="form.title" type="text" :disabled="!isFieldEditable(field)" style="width: 100%;" />
+            <!-- Standard Field: title (Integrated indicator to avoid duplicate text inputs) -->
+            <div
+              v-else-if="field.field_source === 'standard' && field.field_key === 'title'"
+              class="title-field-unified-notice"
+              style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--bg-main); border: 1px dashed var(--border-color); border-radius: 6px; font-size: 13px; color: var(--text-muted);"
+            >
+              <span style="font-weight: 500;">
+                {{ (canEditAny && isFieldEditable(field)) ? '※ タイトルは最上部のヘッダーで直接編集できます' : '※ タイトルは最上部のヘッダーに表示されています' }}
+              </span>
+              <button
+                v-if="canEditAny && isFieldEditable(field)"
+                type="button"
+                class="btn btn-secondary btn-sm"
+                style="padding: 2px 8px; font-size: 12px; white-space: nowrap;"
+                @click="focusTitleInput"
+              >
+                タイトルを編集
+              </button>
             </div>
 
             <!-- Standard Field: type -->
@@ -1238,6 +1267,19 @@ const isDirty = computed(() => {
   if (!initialSnapshot.value) return false
   return JSON.stringify(form) !== initialSnapshot.value
 })
+
+const titleInputRef = ref<HTMLInputElement | null>(null)
+function focusTitleInput() {
+  if (modalTab.value !== 'details') {
+    modalTab.value = 'details'
+  }
+  nextTick(() => {
+    if (titleInputRef.value) {
+      titleInputRef.value.focus()
+      titleInputRef.value.select()
+    }
+  })
+}
 
 function confirmClose() {
   if (isDirty.value && !confirm('未保存の変更があります。破棄して閉じますか？')) {

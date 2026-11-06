@@ -224,48 +224,28 @@
           項目入力
         </div>
 
-        <div
-          v-for="(row, rIdx) in layoutRows"
-          :key="rIdx"
-          :class="`tpl-row-${row.columns_count}`"
-        >
+        <template v-for="(row, rIdx) in layoutRows" :key="rIdx">
           <div
-            v-for="(field, fIdx) in row.fields"
-            :key="fIdx"
-            :class="isFieldViewable(field) ? 'field-slot' : 'field-slot-masked'"
+            v-if="hasVisibleFields(row)"
+            :class="`tpl-row-${row.columns_count}`"
           >
-            <div class="field-label">
-              <span>{{ getFieldLabel(field) }}</span>
-              <span v-if="!isFieldViewable(field)" class="badge badge-amber" style="font-size: 11px;">非表示</span>
-              <span v-else-if="!isFieldEditable(field)" class="badge badge-slate" style="font-size: 11px;">閲覧のみ</span>
-            </div>
-
-            <!-- Non-viewable Masked Slot -->
-            <div v-if="!isFieldViewable(field)" style="font-size: 13px; font-weight: 600; color: var(--text-muted); padding: 6px 0;">
-              {{ getFieldPlaceholder(field) }}
-            </div>
-
-            <!-- Standard Field: title (Integrated indicator to avoid duplicate text inputs) -->
-            <div
-              v-else-if="field.field_source === 'standard' && field.field_key === 'title'"
-              class="title-field-unified-notice"
-              style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--bg-main); border: 1px dashed var(--border-color); border-radius: 6px; font-size: 13px; color: var(--text-muted);"
-            >
-              <span style="font-weight: 500;">
-                {{ (canEditAny && isFieldEditable(field)) ? '※ タイトルは最上部のヘッダーで直接編集できます' : '※ タイトルは最上部のヘッダーに表示されています' }}
-              </span>
-              <button
-                v-if="canEditAny && isFieldEditable(field)"
-                type="button"
-                class="btn btn-secondary btn-sm"
-                style="padding: 2px 8px; font-size: 12px; white-space: nowrap;"
-                @click="focusTitleInput"
+            <template v-for="(field, fIdx) in row.fields" :key="fIdx">
+              <div
+                v-if="!(field.field_source === 'standard' && field.field_key === 'title')"
+                :class="isFieldViewable(field) ? 'field-slot' : 'field-slot-masked'"
               >
-                タイトルを編集
-              </button>
-            </div>
+                <div class="field-label">
+                  <span>{{ getFieldLabel(field) }}</span>
+                  <span v-if="!isFieldViewable(field)" class="badge badge-amber" style="font-size: 11px;">非表示</span>
+                  <span v-else-if="!isFieldEditable(field)" class="badge badge-slate" style="font-size: 11px;">閲覧のみ</span>
+                </div>
 
-            <!-- Standard Field: type -->
+                <!-- Non-viewable Masked Slot -->
+                <div v-if="!isFieldViewable(field)" style="font-size: 13px; font-weight: 600; color: var(--text-muted); padding: 6px 0;">
+                  {{ getFieldPlaceholder(field) }}
+                </div>
+
+                <!-- Standard Field: type -->
             <div v-else-if="field.field_source === 'standard' && field.field_key === 'type'" style="display: flex; align-items: center; gap: 8px;">
               <select v-model="form.type_id" :disabled="!isFieldEditable(field)" style="flex: 1; max-width: 280px;">
                 <option value="">-- 未設定 --</option>
@@ -593,8 +573,10 @@
               </template>
             </div>
           </div>
-        </div>
+        </template>
       </div>
+    </template>
+  </div>
 
       <!-- Agile & Sprint Attributes (Task Only) -->
       <div v-if="targetType === 'task'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
@@ -1465,9 +1447,15 @@ const activeTemplate = computed<Template | null>(() => {
 })
 
 function isFieldHidden(f: TemplateField): boolean {
-  if (f.field_source === 'standard' && f.field_key === 'title') return false
+  if (f.field_source === 'standard' && f.field_key === 'title') return true
   if (f.is_hidden) return true
   return Boolean(fieldPermissions.value[f.field_key]?.is_hidden)
+}
+
+function hasVisibleFields(row: TemplateRow): boolean {
+  return (row.fields || []).some(
+    f => !(f.field_source === 'standard' && f.field_key === 'title') && !isFieldHidden(f)
+  )
 }
 
 const layoutRows = computed<TemplateRow[]>(() => {

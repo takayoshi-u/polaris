@@ -100,6 +100,7 @@ export interface Project {
   name: string
   description: string
   hours_per_day: number
+  sprint_duration_days?: number
   default_issue_template_id?: string | null
   default_task_template_id?: string | null
   total_planned_cost: number

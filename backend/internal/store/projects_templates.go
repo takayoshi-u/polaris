@@ -47,7 +47,7 @@ func (s *Store) GetEffectiveProjectRole(ctx context.Context, projectID, userID s
 
 // CreateProject creates a new project, copying system defaults (hours_per_day, statuses, custom fields, templates),
 // and registers creatorUserID as project Admin.
-func (s *Store) CreateProject(ctx context.Context, creatorUserID, name, description string, hoursPerDay *float64) (*domain.Project, error) {
+func (s *Store) CreateProject(ctx context.Context, creatorUserID, name, description string, hoursPerDay *float64, sprintDurationDays *int) (*domain.Project, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("%w: project name is required", ErrBadRequest)
@@ -63,6 +63,14 @@ func (s *Store) CreateProject(ctx context.Context, creatorUserID, name, descript
 			return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
 		}
 		hpd = *hoursPerDay
+	}
+
+	sprintDuration := 14
+	if sprintDurationDays != nil {
+		if err := domain.ValidateSprintDurationDays(*sprintDurationDays, "sprint_duration_days"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+		sprintDuration = *sprintDurationDays
 	}
 
 	sysStatuses, err := s.ListStatuses(ctx, nil)
@@ -88,9 +96,9 @@ func (s *Store) CreateProject(ctx context.Context, creatorUserID, name, descript
 	now := time.Now().UTC()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO projects (id, name, description, hours_per_day, created_by, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
-	`, projectID, name, description, hpd, creatorUserID, now); err != nil {
+		INSERT INTO projects (id, name, description, hours_per_day, sprint_duration_days, created_by, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+	`, projectID, name, description, hpd, sprintDuration, creatorUserID, now); err != nil {
 		return nil, err
 	}
 
@@ -190,9 +198,9 @@ func (s *Store) GetProject(ctx context.Context, projectID, userID string) (*doma
 	var p domain.Project
 	var issueTpl, taskTpl, createdBy sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, hours_per_day, default_issue_template_id, default_task_template_id, created_by, created_at, updated_at
+		SELECT id, name, description, hours_per_day, sprint_duration_days, default_issue_template_id, default_task_template_id, created_by, created_at, updated_at
 		FROM projects WHERE id = $1
-	`, projectID).Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &issueTpl, &taskTpl, &createdBy, &p.CreatedAt, &p.UpdatedAt)
+	`, projectID).Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &p.SprintDurationDays, &issueTpl, &taskTpl, &createdBy, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -240,7 +248,7 @@ func (s *Store) ListProjects(ctx context.Context, userID string, includeNonMembe
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, hours_per_day, default_issue_template_id, default_task_template_id, created_by, created_at, updated_at
+		SELECT id, name, description, hours_per_day, sprint_duration_days, default_issue_template_id, default_task_template_id, created_by, created_at, updated_at
 		FROM projects ORDER BY id ASC
 	`)
 	if err != nil {
@@ -252,7 +260,7 @@ func (s *Store) ListProjects(ctx context.Context, userID string, includeNonMembe
 	for rows.Next() {
 		var p domain.Project
 		var issueTpl, taskTpl, createdBy sql.NullString
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &issueTpl, &taskTpl, &createdBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &p.SprintDurationDays, &issueTpl, &taskTpl, &createdBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if issueTpl.Valid {
@@ -289,7 +297,7 @@ func (s *Store) ListProjects(ctx context.Context, userID string, includeNonMembe
 	return result, nil
 }
 
-func (s *Store) UpdateProject(ctx context.Context, projectID, userID, name, description string, hoursPerDay float64, defaultIssueTplID, defaultTaskTplID *string) (*domain.Project, error) {
+func (s *Store) UpdateProject(ctx context.Context, projectID, userID, name, description string, hoursPerDay float64, defaultIssueTplID, defaultTaskTplID *string, sprintDurationDays *int) (*domain.Project, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("%w: project name is required", ErrBadRequest)
@@ -297,16 +305,24 @@ func (s *Store) UpdateProject(ctx context.Context, projectID, userID, name, desc
 	if err := domain.ValidateHoursPerDay(hoursPerDay, "hours_per_day"); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
+	var sprintDur *int
+	if sprintDurationDays != nil {
+		if err := domain.ValidateSprintDurationDays(*sprintDurationDays, "sprint_duration_days"); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+		sprintDur = sprintDurationDays
+	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE projects
 		SET name = $1,
 		    description = $2,
 		    hours_per_day = $3,
-		    default_issue_template_id = COALESCE($4, default_issue_template_id),
-		    default_task_template_id = COALESCE($5, default_task_template_id),
-		    updated_at = $6
-		WHERE id = $7
-	`, name, description, hoursPerDay, defaultIssueTplID, defaultTaskTplID, time.Now().UTC(), projectID)
+		    sprint_duration_days = COALESCE($4, sprint_duration_days),
+		    default_issue_template_id = COALESCE($5, default_issue_template_id),
+		    default_task_template_id = COALESCE($6, default_task_template_id),
+		    updated_at = $7
+		WHERE id = $8
+	`, name, description, hoursPerDay, sprintDur, defaultIssueTplID, defaultTaskTplID, time.Now().UTC(), projectID)
 	if err != nil {
 		return nil, err
 	}

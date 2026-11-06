@@ -277,6 +277,14 @@ func ValidateHoursPerDay(v float64, fieldName string) error {
 	return nil
 }
 
+// ValidateSprintDurationDays validates that sprint_duration_days is between 1 and 90 inclusive.
+func ValidateSprintDurationDays(v int, fieldName string) error {
+	if v < 1 || v > 90 {
+		return fmt.Errorf("%s must be between 1 and 90", fieldName)
+	}
+	return nil
+}
+
 // ValidateTaskHours validates that planned_hours / actual_hours is >= 0, <= 999999.99, and has at most 2 decimal places.
 func ValidateTaskHours(v *float64, fieldName string) error {
 	if v == nil {

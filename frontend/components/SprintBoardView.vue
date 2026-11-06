@@ -806,13 +806,16 @@
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div>
               <label class="field-label">開始日</label>
-              <input v-model="sprintForm.start_date" type="date" style="width: 100%;" />
+              <input v-model="sprintForm.start_date" type="date" style="width: 100%;" @change="onStartDateChange" />
             </div>
             <div>
               <label class="field-label">終了日</label>
               <input v-model="sprintForm.end_date" type="date" style="width: 100%;" />
             </div>
           </div>
+          <p v-if="!isEditing" style="font-size: 11px; color: var(--text-muted); margin: -4px 0 0 0;">
+            ※ 既存スプリントの最大終了日の翌日を開始日とし、プロジェクト設定の期間（{{ props.sprintDurationDays || 14 }}日間）が自動設定されます
+          </p>
 
           <div>
             <label class="field-label">状態</label>
@@ -837,7 +840,15 @@
 
 <script setup lang="ts">
 import type { Sprint, SprintBurndown, Status, Task } from '~/types/polaris'
-import { calculateSprintMetrics, calculateVelocityStats, formatHours, formatLocalYMD, isTaskCompleted } from '~/utils/format'
+import {
+  calculateDefaultSprintDates,
+  calculateSprintEndDateFromStart,
+  calculateSprintMetrics,
+  calculateVelocityStats,
+  formatHours,
+  formatLocalYMD,
+  isTaskCompleted
+} from '~/utils/format'
 
 const props = defineProps<{
   projectId: string
@@ -845,6 +856,7 @@ const props = defineProps<{
   allTasks: Task[]
   statuses: Status[]
   canEdit: boolean
+  sprintDurationDays?: number
 }>()
 
 const emit = defineEmits<{
@@ -1008,14 +1020,22 @@ const incompleteSPForClosing = computed(() => {
 function openCreateModal() {
   isEditing.value = false
   editingSprintId.value = null
-  sprintForm.name = `Sprint ${props.sprints.length + 1}`
+  const defaults = calculateDefaultSprintDates(props.sprints, props.sprintDurationDays || 14)
+  sprintForm.name = defaults.suggested_name
   sprintForm.goal = ''
-  sprintForm.start_date = formatLocalYMD(new Date())
-  const d = new Date()
-  d.setDate(d.getDate() + 14)
-  sprintForm.end_date = formatLocalYMD(d)
+  sprintForm.start_date = defaults.start_date
+  sprintForm.end_date = defaults.end_date
   sprintForm.status = 'planned'
   modalOpen.value = true
+}
+
+function onStartDateChange() {
+  if (!isEditing.value && sprintForm.start_date) {
+    const end = calculateSprintEndDateFromStart(sprintForm.start_date, props.sprintDurationDays || 14)
+    if (end) {
+      sprintForm.end_date = end
+    }
+  }
 }
 
 function openEditModal(sp: Sprint) {

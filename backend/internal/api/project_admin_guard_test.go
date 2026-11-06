@@ -126,9 +126,9 @@ func (s *guardMockStmt) Exec(args []driver.Value) (driver.Result, error) {
 		return driver.RowsAffected(0), nil
 
 	case strings.Contains(q, "UPDATE projects"):
-		// UPDATE projects SET name = $1, description = $2, hours_per_day = $3 ... WHERE id = $7
+		// UPDATE projects SET name = $1, description = $2, hours_per_day = $3, sprint_duration_days = COALESCE($4, ...) ... WHERE id = $8
 		if len(args) >= 7 {
-			projID := fmt.Sprintf("%v", args[6])
+			projID := fmt.Sprintf("%v", args[len(args)-1])
 			if p, ok := st.projects[projID]; ok {
 				p.Name = fmt.Sprintf("%v", args[0])
 				p.Description = fmt.Sprintf("%v", args[1])
@@ -209,7 +209,7 @@ func (s *guardMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		// GetProject query
 		projID := fmt.Sprintf("%v", args[0])
 		p, exists := st.projects[projID]
-		cols := []string{"id", "name", "description", "hours_per_day", "default_issue_template_id", "default_task_template_id", "created_by", "created_at", "updated_at"}
+		cols := []string{"id", "name", "description", "hours_per_day", "sprint_duration_days", "default_issue_template_id", "default_task_template_id", "created_by", "created_at", "updated_at"}
 		if !exists {
 			return &mockRows{cols: cols, rows: nil}, nil
 		}
@@ -217,8 +217,12 @@ func (s *guardMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		if p.CreatedBy != nil {
 			createdByVal = *p.CreatedBy
 		}
+		sprintDur := p.SprintDurationDays
+		if sprintDur == 0 {
+			sprintDur = 14
+		}
 		values := [][]driver.Value{{
-			p.ID, p.Name, p.Description, p.HoursPerDay, nil, nil, createdByVal, p.CreatedAt, p.UpdatedAt,
+			p.ID, p.Name, p.Description, p.HoursPerDay, int64(sprintDur), nil, nil, createdByVal, p.CreatedAt, p.UpdatedAt,
 		}}
 		return &mockRows{cols: cols, rows: values}, nil
 

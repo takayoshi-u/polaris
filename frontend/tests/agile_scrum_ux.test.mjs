@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  addDaysYMD,
   isDoneStatusName,
   resolveDoneStatusIds,
   isTaskCompleted,
@@ -11,20 +12,12 @@ import {
   calculateVelocityStats,
   getGanttScaleConfig,
   buildGanttHeaderGroups,
-  formatLocalYMD
+  formatLocalYMD,
+  calculateDefaultSprintDates,
+  calculateSprintEndDateFromStart
 } from '../utils/agile_gantt.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-function addDaysYMD(ymd, days) {
-  const parts = ymd.split('-').map(Number)
-  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
-  dt.setUTCDate(dt.getUTCDate() + days)
-  const y = dt.getUTCFullYear()
-  const m = String(dt.getUTCMonth() + 1).padStart(2, '0')
-  const d = String(dt.getUTCDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
 
 function generateDateRangeYMD(startYMD, count) {
   const list = []
@@ -186,6 +179,35 @@ test('formatLocalYMD formats local calendar dates without UTC shifts', () => {
   assert.equal(formatLocalYMD(sample), '2026-11-05')
 })
 
+test('calculateDefaultSprintDates and calculateSprintEndDateFromStart compute next-sprint dates and respect custom duration', () => {
+  // 1. First sprint (no existing sprints -> starts todayYMD, ends todayYMD + 13d for 14-day duration, Sprint 1)
+  const firstDefaults = calculateDefaultSprintDates([], 14, '2026-11-01')
+  assert.equal(firstDefaults.start_date, '2026-11-01')
+  assert.equal(firstDefaults.end_date, '2026-11-14')
+  assert.equal(firstDefaults.suggested_name, 'Sprint 1')
+  assert.equal(firstDefaults.duration_days, 14)
+
+  // 2. Subsequent sprint (existing sprints with end_date: '2026-11-14' and '2026-11-05' -> starts '2026-11-15', ends '2026-11-28', Sprint 3)
+  const existingSprints = [
+    { id: 'sp1', name: 'Sprint 1', start_date: '2026-10-23', end_date: '2026-11-05' },
+    { id: 'sp2', name: 'Sprint 2', start_date: '2026-11-01', end_date: '2026-11-14' }
+  ]
+  const nextDefaults = calculateDefaultSprintDates(existingSprints, 14, '2026-11-01')
+  assert.equal(nextDefaults.start_date, '2026-11-15')
+  assert.equal(nextDefaults.end_date, '2026-11-28')
+  assert.equal(nextDefaults.suggested_name, 'Sprint 3')
+
+  // 3. Custom duration: 7 days -> start + 6d, 21 days -> start + 20d
+  const sevenDayDefaults = calculateDefaultSprintDates(existingSprints, 7, '2026-11-01')
+  assert.equal(sevenDayDefaults.start_date, '2026-11-15')
+  assert.equal(sevenDayDefaults.end_date, '2026-11-21')
+  assert.equal(sevenDayDefaults.duration_days, 7)
+
+  assert.equal(calculateSprintEndDateFromStart('2026-11-15', 7), '2026-11-21')
+  assert.equal(calculateSprintEndDateFromStart('2026-11-15', 21), '2026-12-05')
+  assert.equal(calculateSprintEndDateFromStart('', 14), '')
+})
+
 test('buildGanttHeaderGroups differentiates day, week, and month scales with exact width sums', () => {
   // 1. Day scale: 30 days, 48px
   const dayCfg = getGanttScaleConfig('day')
@@ -255,4 +277,49 @@ test('Source files contain required Agile/Scrum and UX enhancements', () => {
   assert.ok(projectPageSrc.includes('sprintsWithDates'))
   assert.ok(projectPageSrc.includes('filters.sprint_id'))
   assert.ok(projectPageSrc.includes('allProjectIssues'))
+})
+
+test('sprint_duration_days clamps invalid values (1..90, fallback 14)', () => {
+  const end = (d) => calculateSprintEndDateFromStart('2026-01-01', d)
+  assert.equal(end(0), '2026-01-14')
+  assert.equal(end(NaN), '2026-01-14')
+  assert.equal(end(null), '2026-01-14')
+  assert.equal(end(undefined), '2026-01-14')
+  assert.equal(end(999), '2026-03-31')
+  assert.equal(end(-5), '2026-01-01')
+  assert.equal(calculateDefaultSprintDates([], 999, '2026-01-01').duration_days, 90)
+  assert.equal(calculateDefaultSprintDates([], NaN, '2026-01-01').duration_days, 14)
+  assert.equal(calculateDefaultSprintDates([], null, '2026-01-01').end_date, '2026-01-14')
+})
+
+test('sprints with null/invalid end_date are ignored, falling back to today', () => {
+  const r = calculateDefaultSprintDates(
+    [{ name: 'x', end_date: null }, { name: 'y', end_date: 'garbage' }, { name: 'z', end_date: '2026-02-31' }, null],
+    7, '2026-05-10')
+  assert.equal(r.start_date, '2026-05-10')
+  assert.equal(r.end_date, '2026-05-16')
+  assert.doesNotMatch(JSON.stringify(r), /NaN|undefined/)
+})
+
+test('suggested sprint name goes above existing max number', () => {
+  const r = calculateDefaultSprintDates([{ name: 'Sprint 5', end_date: '2026-01-10' }], 14, '2026-01-01')
+  assert.equal(r.suggested_name, 'Sprint 6')
+  assert.equal(r.start_date, '2026-01-11')
+})
+
+test('calculateSprintEndDateFromStart is safe for malformed dates', () => {
+  for (const bad of ['abc', '2026-1-1', '2026-13-45', '2026-02-31', '', null, undefined, 123, {}]) {
+    let out
+    assert.doesNotThrow(() => { out = calculateSprintEndDateFromStart(bad, 14) })
+    assert.equal(out, '')
+  }
+})
+
+test('project page sends sprint_duration_days and passes it to SprintBoardView', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../pages/projects/[id].vue'), 'utf8')
+  assert.match(src, /const projForm = reactive\(\{[^}]*sprint_duration_days:\s*14/s)
+  assert.match(src, /projForm\.sprint_duration_days\s*=\s*p\.sprint_duration_days/)
+  assert.match(src, /v-model\.number="projForm\.sprint_duration_days"/)
+  assert.match(src, /body:\s*JSON\.stringify\(projForm\)/)
+  assert.match(src, /:sprint-duration-days="project\?\.sprint_duration_days \|\| 14"/)
 })

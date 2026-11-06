@@ -165,6 +165,7 @@ type Project struct {
 	Name                   string      `json:"name"`
 	Description            string      `json:"description"`
 	HoursPerDay            float64     `json:"hours_per_day"`
+	SprintDurationDays     int         `json:"sprint_duration_days"`
 	DefaultIssueTemplateID *string     `json:"default_issue_template_id"`
 	DefaultTaskTemplateID  *string     `json:"default_task_template_id"`
 	TotalPlannedCost       float64     `json:"total_planned_cost"`

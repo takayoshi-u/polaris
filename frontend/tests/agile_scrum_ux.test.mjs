@@ -334,17 +334,28 @@ test('ItemDetailModal unifies title display and inline edit in header, eliminati
   assert.ok(modalSrc.includes('unified-title-input'), 'unified-title-input class must be used')
   assert.ok(modalSrc.includes('placeholder="タイトルを入力..."'), 'Header title input must have proper placeholder')
   assert.ok(modalSrc.includes("isKeyEditable('title')"), 'isKeyEditable title check must be present')
-  assert.ok(modalSrc.includes('focusTitleInput'), 'focusTitleInput helper must be implemented')
   assert.ok(modalSrc.includes('unified-title-heading'), 'unified-title-heading must be used for view-only state')
 
-  // Template grid avoids duplicate text input and renders indicator with focus action
+  // Template grid avoids duplicate text input, contains NO title notice or slot, and collapses empty rows
   assert.ok(
-    modalSrc.includes('※ タイトルは最上部のヘッダーで直接編集できます'),
-    'Template grid must contain header title redirection notice'
+    !modalSrc.includes('title-field-unified-notice'),
+    'Template grid must NOT contain title notice class'
   )
   assert.ok(
-    !modalSrc.includes('field.field_key === \'title\'">\n              <input v-model="form.title"'),
-    'Duplicate title text input in template grid must be removed'
+    !modalSrc.includes('※ タイトルは最上部のヘッダーで直接編集できます'),
+    'Template grid must NOT contain redundant title redirection notice'
+  )
+  assert.ok(
+    !modalSrc.includes("v-else-if=\"field.field_source === 'standard' && field.field_key === 'title'\""),
+    'Duplicate title slot/field in template grid must be completely removed'
+  )
+  assert.ok(
+    modalSrc.includes('hasVisibleFields(row)'),
+    'Row loop must check hasVisibleFields to skip empty row containers'
+  )
+  assert.ok(
+    modalSrc.includes("!(field.field_source === 'standard' && field.field_key === 'title')"),
+    'Field loop must skip any standard title field slot'
   )
 
   // Styling for unified title input

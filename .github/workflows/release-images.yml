@@ -31,6 +31,10 @@ jobs:
             context: ./frontend
             file: ./frontend/Dockerfile
             image-suffix: -frontend
+          - name: mcp
+            context: ./mcp
+            file: ./mcp/Dockerfile
+            image-suffix: -mcp
 
     steps:
       - name: Checkout repository

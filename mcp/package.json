@@ -1,0 +1,22 @@
+{
+  "name": "polaris-mcp-server",
+  "version": "1.0.0",
+  "description": "Model Context Protocol (MCP) Server for Polaris Project Management System",
+  "type": "module",
+  "bin": {
+    "polaris-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

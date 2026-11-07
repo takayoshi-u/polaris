@@ -363,3 +363,64 @@ test('ItemDetailModal unifies title display and inline edit in header, eliminati
   assert.ok(cssSrc.includes('.unified-title-input:hover'), 'main.css must contain hover styling')
   assert.ok(cssSrc.includes('.unified-title-input:focus'), 'main.css must contain focus styling')
 })
+
+test('WikiView implements data loss prevention, Ctrl+S shortcut, and zero-pages empty state CTA', () => {
+  const wikiSrc = fs.readFileSync(path.join(__dirname, '../components/WikiView.vue'), 'utf8')
+
+  // Data loss prevention
+  assert.ok(wikiSrc.includes('const isDirty = computed'), 'WikiView must define isDirty computed state')
+  assert.ok(wikiSrc.includes('initialSnapshot'), 'WikiView must use initialSnapshot for dirty comparison')
+  assert.ok(wikiSrc.includes("addEventListener('beforeunload'"), 'WikiView must attach beforeunload event listener')
+  assert.ok(wikiSrc.includes("removeEventListener('beforeunload'"), 'WikiView must remove beforeunload event listener on unmount')
+  assert.ok(wikiSrc.includes('onBeforeRouteLeave'), 'WikiView must guard route leave on uncommitted changes')
+
+  // Ctrl+S / Cmd+S shortcut
+  assert.ok(wikiSrc.includes("e.key.toLowerCase() === 's'"), 'WikiView must detect Ctrl+S / Cmd+S shortcut')
+  assert.ok(wikiSrc.includes('savePage()'), 'WikiView shortcut must invoke savePage()')
+
+  // Empty state when 0 wiki pages
+  assert.ok(wikiSrc.includes('wiki-empty-state'), 'WikiView must render wiki-empty-state container when 0 pages')
+  assert.ok(wikiSrc.includes('＋ 最初のWikiドキュメントを作成'), 'WikiView must feature prominent empty state CTA button')
+})
+
+test('Kanban, List, and SprintBoard implement friendly empty states and direct task creation per cell', () => {
+  const projectPageSrc = fs.readFileSync(path.join(__dirname, '../pages/projects/[id].vue'), 'utf8')
+  const sprintSrc = fs.readFileSync(path.join(__dirname, '../components/SprintBoardView.vue'), 'utf8')
+  const cssSrc = fs.readFileSync(path.join(__dirname, '../assets/css/main.css'), 'utf8')
+
+  // Kanban & List Empty States
+  assert.ok(projectPageSrc.includes('kanban-empty-state'), 'Kanban must render kanban-empty-state when 0 issues')
+  assert.ok(projectPageSrc.includes('list-empty-state'), 'List view must render list-empty-state when 0 issues')
+  assert.ok(projectPageSrc.includes('＋ 新規課題を作成'), 'Empty state must feature ＋ 新規課題を作成 button')
+
+  // Sprint Empty State
+  assert.ok(sprintSrc.includes('sprint-empty-state'), 'SprintBoardView must render sprint-empty-state when 0 sprints')
+  assert.ok(sprintSrc.includes('＋ 最初のスプリントを作成'), 'SprintBoardView must feature ＋ 最初のスプリントを作成 button')
+
+  // Kanban Direct Task Creation per Cell
+  assert.ok(projectPageSrc.includes('kanban-cell-add-task-btn'), 'Kanban cell must render add task quick button')
+  assert.ok(projectPageSrc.includes('openCreateTaskModal(iss, st.id)'), 'Cell add task must pass issue and status_id to openCreateTaskModal')
+  assert.ok(projectPageSrc.includes('function openCreateTaskModal'), 'openCreateTaskModal helper must be implemented')
+
+  // Card Affordance
+  assert.ok(cssSrc.includes('transform: translateY(-2px)'), 'Kanban card must feature hover lift transform')
+  assert.ok(cssSrc.includes('box-shadow: 0 4px 12px'), 'Kanban card must feature elevated hover box-shadow')
+})
+
+test('ItemDetailModal organizes long sections into clean sub-tabs under details', () => {
+  const modalSrc = fs.readFileSync(path.join(__dirname, '../components/ItemDetailModal.vue'), 'utf8')
+
+  // Sub-tabs switcher & reactive state
+  assert.ok(modalSrc.includes('item-detail-subtabs'), 'Modal must render item-detail-subtabs bar')
+  assert.ok(modalSrc.includes('const detailSubTab = ref'), 'Modal must define detailSubTab reactive state')
+
+  // 4 distinct sub-tabs
+  assert.ok(modalSrc.includes("detailSubTab === 'general'"), 'General subtab must exist for basic info')
+  assert.ok(modalSrc.includes("detailSubTab === 'deps_attachments'"), 'Dependencies & Attachments subtab must exist')
+  assert.ok(modalSrc.includes("detailSubTab === 'risk_retrospective'"), 'Risk & Retrospective subtab must exist for issues')
+  assert.ok(modalSrc.includes("detailSubTab === 'comments'"), 'Comments subtab must exist')
+
+  // History tab accessibility & save bar preservation
+  assert.ok(modalSrc.includes("modalTab === 'history'"), 'History activity tab must remain accessible')
+  assert.ok(modalSrc.includes('isDirty && canEditAny'), 'Sticky floating dirty bar must remain available for instant saves')
+})

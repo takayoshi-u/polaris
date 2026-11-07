@@ -187,6 +187,64 @@
 
       <!-- DETAILS TAB CONTENT -->
       <template v-else>
+      <!-- Details Sub-Tabs Switcher -->
+      <div class="item-detail-subtabs" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          <button
+            type="button"
+            class="btn btn-sm"
+            :class="detailSubTab === 'general' ? 'btn-primary' : 'btn-secondary'"
+            style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;"
+            @click="detailSubTab = 'general'"
+          >
+            <span>📝</span>
+            <span>基本情報</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-sm"
+            :class="detailSubTab === 'deps_attachments' ? 'btn-primary' : 'btn-secondary'"
+            style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;"
+            @click="detailSubTab = 'deps_attachments'"
+          >
+            <span>🔗</span>
+            <span>依存関係 ＆ 添付</span>
+            <span v-if="attachments.length > 0" class="badge badge-slate" style="font-size: 10px; padding: 1px 5px;">
+              {{ attachments.length }}
+            </span>
+          </button>
+
+          <button
+            v-if="targetType === 'issue'"
+            type="button"
+            class="btn btn-sm"
+            :class="detailSubTab === 'risk_retrospective' ? 'btn-primary' : 'btn-secondary'"
+            style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;"
+            @click="detailSubTab = 'risk_retrospective'"
+          >
+            <span>🛡️</span>
+            <span>振り返り・リスク</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-sm"
+            :class="detailSubTab === 'comments' ? 'btn-primary' : 'btn-secondary'"
+            style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;"
+            @click="detailSubTab = 'comments'"
+          >
+            <span>💬</span>
+            <span>コメント</span>
+            <span v-if="comments.length > 0" class="badge badge-slate" style="font-size: 10px; padding: 1px 5px;">
+              {{ comments.length }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- SUBTAB 1: GENERAL (基本情報) -->
+      <div v-show="detailSubTab === 'general'" style="display: flex; flex-direction: column; gap: 16px;">
       <!-- Issue Rollup Summary Banner (When viewing an Issue) -->
       <div
         v-if="targetType === 'issue' && issue?.rollup"
@@ -610,136 +668,6 @@
         </div>
       </div>
 
-      <!-- Issue Pre-mortem & Post-mortem Section (Issue Only) -->
-      <div v-if="targetType === 'issue'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-          <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
-            <span>🛡️ プレモーテム（事前リスク予測） ＆ 🔍 ポストモーテム（事後振り返り）</span>
-          </h3>
-          <span style="font-size: 12px; color: var(--text-muted);">
-            計画時の失敗シナリオ予測と、完了時のKPT・実績振り返りを記録できます
-          </span>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
-          <!-- Card 1: Pre-mortem -->
-          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 8px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-              <strong style="font-size: 13px;">🛡️ プレモーテム（事前リスク予測・予防策）</strong>
-              <button
-                v-if="canEditAny"
-                type="button"
-                class="btn btn-secondary btn-sm"
-                style="font-size: 11px; padding: 2px 8px;"
-                @click="insertPremortemTemplate"
-              >
-                📋 テンプレート挿入
-              </button>
-            </div>
-
-            <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
-              <button
-                type="button"
-                class="btn btn-sm"
-                :class="premortemTab === 'write' ? 'btn-primary' : 'btn-secondary'"
-                style="padding: 2px 8px; font-size: 11px;"
-                @click="premortemTab = 'write'"
-              >
-                編集 (Write)
-              </button>
-              <button
-                type="button"
-                class="btn btn-sm"
-                :class="premortemTab === 'preview' ? 'btn-primary' : 'btn-secondary'"
-                style="padding: 2px 8px; font-size: 11px;"
-                @click="premortemTab = 'preview'"
-              >
-                プレビュー (Preview)
-              </button>
-            </div>
-
-            <textarea
-              v-if="premortemTab === 'write'"
-              v-model="form.premortem"
-              rows="7"
-              :disabled="!isKeyEditable('premortem')"
-              style="width: 100%; font-size: 12px;"
-              placeholder="プロジェクトや課題が失敗するとしたら何が原因か？事前のリスクシナリオと予防策を記述..."
-            ></textarea>
-            <div
-              v-else
-              class="markdown-body"
-              style="padding: 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); min-height: 140px; font-size: 13px;"
-              v-html="renderSafeMarkdown(form.premortem || '*(プレモーテムの記述がありません)*')"
-            ></div>
-          </div>
-
-          <!-- Card 2: Post-mortem -->
-          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 8px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-              <strong style="font-size: 13px;">🔍 ポストモーテム（事後検証・振り返り）</strong>
-              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                <button
-                  v-if="canEditAny"
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  style="font-size: 11px; padding: 2px 8px;"
-                  @click="insertPostmortemTemplate"
-                >
-                  📋 テンプレート挿入（実績引用）
-                </button>
-                <button
-                  v-if="canEditAny"
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  style="font-size: 11px; padding: 2px 8px;"
-                  :disabled="isExportingWiki"
-                  @click="exportPostmortemToWiki"
-                >
-                  📚 Wikiへ振り返り記事として保存
-                </button>
-              </div>
-            </div>
-
-            <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
-              <button
-                type="button"
-                class="btn btn-sm"
-                :class="postmortemTab === 'write' ? 'btn-primary' : 'btn-secondary'"
-                style="padding: 2px 8px; font-size: 11px;"
-                @click="postmortemTab = 'write'"
-              >
-                編集 (Write)
-              </button>
-              <button
-                type="button"
-                class="btn btn-sm"
-                :class="postmortemTab === 'preview' ? 'btn-primary' : 'btn-secondary'"
-                style="padding: 2px 8px; font-size: 11px;"
-                @click="postmortemTab = 'preview'"
-              >
-                プレビュー (Preview)
-              </button>
-            </div>
-
-            <textarea
-              v-if="postmortemTab === 'write'"
-              v-model="form.postmortem"
-              rows="7"
-              :disabled="!isKeyEditable('postmortem')"
-              style="width: 100%; font-size: 12px;"
-              placeholder="予実ギャップの分析やKPT (Keep / Problem / Try)、次への学びを記述..."
-            ></textarea>
-            <div
-              v-else
-              class="markdown-body"
-              style="padding: 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); min-height: 140px; font-size: 13px;"
-              v-html="renderSafeMarkdown(form.postmortem || '*(ポストモーテムの記述がありません)*')"
-            ></div>
-          </div>
-        </div>
-      </div>
-
       <!-- Static Form-Bottom Save Bar -->
       <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 8px; border-top: 1px dashed var(--border-color);">
         <span v-if="isDirty" style="font-size: 12px; color: var(--warning, #d97706); font-weight: 600;">
@@ -757,15 +685,18 @@
           <span v-else>変更を保存</span>
         </button>
       </div>
+      </div>
 
-      <!-- Task Dependencies Section (Task Only) -->
-      <div v-if="targetType === 'task'" style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-          <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
-            <span>🔗 タスク依存関係（FS / SS / FF / SF）</span>
-            <span class="badge badge-slate" style="font-size: 11px;">先行 {{ predecessorDeps.length }}件 / 後続 {{ successorDeps.length }}件</span>
-          </h3>
-        </div>
+      <!-- SUBTAB 2: DEPENDENCIES & ATTACHMENTS (依存関係 ＆ 添付) -->
+      <div v-show="detailSubTab === 'deps_attachments'" style="display: flex; flex-direction: column; gap: 18px;">
+        <!-- Task Dependencies Section (Task Only) -->
+        <div v-if="targetType === 'task'" style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+              <span>🔗 タスク依存関係（FS / SS / FF / SF）</span>
+              <span class="badge badge-slate" style="font-size: 11px;">先行 {{ predecessorDeps.length }}件 / 後続 {{ successorDeps.length }}件</span>
+            </h3>
+          </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
           <!-- Predecessor Tasks -->
@@ -985,7 +916,144 @@
           </div>
         </div>
       </div>
+      </div>
 
+      <!-- SUBTAB 3: RISK & RETROSPECTIVE (振り返り・リスク) (Issue Only) -->
+      <div
+        v-if="targetType === 'issue'"
+        v-show="detailSubTab === 'risk_retrospective'"
+        style="display: flex; flex-direction: column; gap: 14px;"
+      >
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <h3 style="font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+            <span>🛡️ プレモーテム（事前リスク予測） ＆ 🔍 ポストモーテム（事後振り返り）</span>
+          </h3>
+          <span style="font-size: 12px; color: var(--text-muted);">
+            計画時の失敗シナリオ予測と、完了時のKPT・実績振り返りを記録できます
+          </span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+          <!-- Card 1: Pre-mortem -->
+          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+              <strong style="font-size: 13px;">🛡️ プレモーテム（事前リスク予測・予防策）</strong>
+              <button
+                v-if="canEditAny"
+                type="button"
+                class="btn btn-secondary btn-sm"
+                style="font-size: 11px; padding: 2px 8px;"
+                @click="insertPremortemTemplate"
+              >
+                📋 テンプレート挿入
+              </button>
+            </div>
+
+            <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="premortemTab === 'write' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="premortemTab = 'write'"
+              >
+                編集 (Write)
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="premortemTab === 'preview' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="premortemTab = 'preview'"
+              >
+                プレビュー (Preview)
+              </button>
+            </div>
+
+            <textarea
+              v-if="premortemTab === 'write'"
+              v-model="form.premortem"
+              rows="7"
+              :disabled="!isKeyEditable('premortem')"
+              style="width: 100%; font-size: 12px;"
+              placeholder="プロジェクトや課題が失敗するとしたら何が原因か？事前のリスクシナリオと予防策を記述..."
+            ></textarea>
+            <div
+              v-else
+              class="markdown-body"
+              style="padding: 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); min-height: 140px; font-size: 13px;"
+              v-html="renderSafeMarkdown(form.premortem || '*(プレモーテムの記述がありません)*')"
+            ></div>
+          </div>
+
+          <!-- Card 2: Post-mortem -->
+          <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; background: var(--bg-input); display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+              <strong style="font-size: 13px;">🔍 ポストモーテム（事後検証・振り返り）</strong>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <button
+                  v-if="canEditAny"
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  style="font-size: 11px; padding: 2px 8px;"
+                  @click="insertPostmortemTemplate"
+                >
+                  📋 テンプレート挿入（実績引用）
+                </button>
+                <button
+                  v-if="canEditAny"
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  style="font-size: 11px; padding: 2px 8px;"
+                  :disabled="isExportingWiki"
+                  @click="exportPostmortemToWiki"
+                >
+                  📚 Wikiへ振り返り記事として保存
+                </button>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="postmortemTab === 'write' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="postmortemTab = 'write'"
+              >
+                編集 (Write)
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                :class="postmortemTab === 'preview' ? 'btn-primary' : 'btn-secondary'"
+                style="padding: 2px 8px; font-size: 11px;"
+                @click="postmortemTab = 'preview'"
+              >
+                プレビュー (Preview)
+              </button>
+            </div>
+
+            <textarea
+              v-if="postmortemTab === 'write'"
+              v-model="form.postmortem"
+              rows="7"
+              :disabled="!isKeyEditable('postmortem')"
+              style="width: 100%; font-size: 12px;"
+              placeholder="予実ギャップの分析やKPT (Keep / Problem / Try)、次への学びを記述..."
+            ></textarea>
+            <div
+              v-else
+              class="markdown-body"
+              style="padding: 10px; border-radius: 6px; background: var(--bg-main); border: 1px solid var(--border-color); min-height: 140px; font-size: 13px;"
+              v-html="renderSafeMarkdown(form.postmortem || '*(ポストモーテムの記述がありません)*')"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUBTAB 4: COMMENTS (コメント) -->
+      <div v-show="detailSubTab === 'comments'" style="display: flex; flex-direction: column; gap: 18px;">
       <!-- Comments & Mentions Section -->
       <div style="border-top: 1px solid var(--border-color); padding-top: 14px; display: flex; flex-direction: column; gap: 12px;">
         <h3 style="font-size: 14px; font-weight: 700;">💬 コメント・メンション（Markdown対応 / ファイル同時添付可）</h3>
@@ -1134,6 +1202,7 @@
           </div>
         </form>
       </div>
+      </div>
       </template>
     </div>
 
@@ -1239,6 +1308,14 @@ const canTransferOwner = computed(() => {
 })
 
 const modalTab = ref<'details' | 'history'>('details')
+type DetailSubTab = 'general' | 'deps_attachments' | 'risk_retrospective' | 'comments'
+const detailSubTab = ref<DetailSubTab>('general')
+
+watch(() => props.targetType, (t) => {
+  if (t === 'task' && detailSubTab.value === 'risk_retrospective') {
+    detailSubTab.value = 'general'
+  }
+})
 
 const applicableTemplates = computed(() => props.templates.filter(t => t.target_type === props.targetType))
 
@@ -1255,6 +1332,7 @@ function focusTitleInput() {
   if (modalTab.value !== 'details') {
     modalTab.value = 'details'
   }
+  detailSubTab.value = 'general'
   nextTick(() => {
     if (titleInputRef.value) {
       titleInputRef.value.focus()

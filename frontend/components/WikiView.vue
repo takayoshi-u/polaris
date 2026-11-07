@@ -21,8 +21,35 @@
       </div>
     </div>
 
+    <!-- Empty State when 0 Wiki Pages -->
+    <div
+      v-if="flatPages.length === 0 && !isCreating"
+      class="wiki-empty-state"
+      style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px; text-align: center; gap: 16px; flex: 1; min-height: 480px;"
+    >
+      <div style="font-size: 48px; line-height: 1;">📖</div>
+      <div style="max-width: 480px; display: flex; flex-direction: column; gap: 8px;">
+        <h3 style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 0;">
+          Wikiドキュメントがまだありません
+        </h3>
+        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.6; margin: 0;">
+          プロジェクトの仕様書、開発規約、議事録などをWikiに記録してチームで共有しましょう。<br />
+          タスクIDやタスク名を使って、Wiki内にタスクカードを直接埋め込むこともできます。
+        </p>
+      </div>
+      <button
+        v-if="canEdit"
+        type="button"
+        class="btn btn-primary"
+        style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; padding: 10px 20px; font-size: 14px;"
+        @click="startNewPage(null)"
+      >
+        <span>＋ 最初のWikiドキュメントを作成</span>
+      </button>
+    </div>
+
     <!-- Main 2-Pane Layout -->
-    <div style="display: grid; grid-template-columns: 280px 1fr; flex: 1; min-height: 550px;">
+    <div v-else style="display: grid; grid-template-columns: 280px 1fr; flex: 1; min-height: 550px;">
       <!-- Left Pane: Page Tree & Search -->
       <div style="border-right: 1px solid var(--border-color); background: var(--bg-card); display: flex; flex-direction: column; gap: 10px; padding: 12px;">
         <!-- Search Filter -->
@@ -136,7 +163,9 @@
                 <button
                   type="button"
                   class="btn btn-primary btn-sm"
+                  :class="{ 'btn-dirty': isDirty }"
                   :disabled="isSaving"
+                  title="Ctrl+S で即座に保存"
                   @click="savePage"
                 >
                   {{ isSaving ? '保存中...' : 'ページを保存' }}
@@ -277,6 +306,7 @@ const isEditing = ref(false)
 const isCreating = ref(false)
 const isSaving = ref(false)
 const editorTab = ref<'write' | 'preview'>('write')
+const initialSnapshot = ref('')
 
 const pageForm = reactive({
   title: '',
@@ -284,6 +314,46 @@ const pageForm = reactive({
   content: '',
   parent_id: null as string | null,
   sort_order: 0
+})
+
+const isDirty = computed(() => {
+  if (!isEditing.value && !isCreating.value) return false
+  if (!initialSnapshot.value) return false
+  return JSON.stringify(pageForm) !== initialSnapshot.value
+})
+
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (isDirty.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+function handleKeyDown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    if (isEditing.value || isCreating.value) {
+      e.preventDefault()
+      savePage()
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('keydown', handleKeyDown)
+})
+
+onBeforeRouteLeave((to, from, next) => {
+  if (isDirty.value && !confirm('未保存の変更があります。破棄して移動しますか？')) {
+    next(false)
+  } else {
+    next()
+  }
 })
 
 const statusMap = computed(() => {
@@ -417,11 +487,10 @@ async function loadWikiPages() {
 watch(() => props.projectId, () => loadWikiPages(), { immediate: true })
 
 function selectPage(pageId: string) {
-  if (isEditing.value || isCreating.value) {
-    if (!confirm('編集中です。変更を破棄して別のページへ移動しますか？')) return
-  }
+  if (isDirty.value && !confirm('未保存の変更があります。破棄して別のページへ移動しますか？')) return
   isEditing.value = false
   isCreating.value = false
+  initialSnapshot.value = ''
   selectedPageId.value = pageId
 }
 
@@ -434,6 +503,7 @@ function startNewPage(parentId: string | null = null) {
   pageForm.parent_id = parentId
   pageForm.sort_order = flatPages.value.length + 1
   editorTab.value = 'write'
+  initialSnapshot.value = JSON.stringify(pageForm)
 }
 
 function startEditCurrentPage() {
@@ -446,11 +516,14 @@ function startEditCurrentPage() {
   pageForm.parent_id = currentPage.value.parent_id || null
   pageForm.sort_order = currentPage.value.sort_order || 0
   editorTab.value = 'write'
+  initialSnapshot.value = JSON.stringify(pageForm)
 }
 
 function cancelEdit() {
+  if (isDirty.value && !confirm('未保存の変更があります。破棄しますか？')) return
   isEditing.value = false
   isCreating.value = false
+  initialSnapshot.value = ''
 }
 
 function onTitleInput() {
@@ -489,6 +562,7 @@ async function savePage() {
     }
     isEditing.value = false
     isCreating.value = false
+    initialSnapshot.value = ''
   } catch (e: any) {
     notifyToast(e.message || 'ページの保存に失敗しました', 'error')
   } finally {

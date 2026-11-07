@@ -49,7 +49,32 @@
       </div>
     </div>
 
-    <!-- SUBVIEW 1: SPRINT PLANNING AREA -->
+    <!-- Zero Sprints Empty State -->
+    <div
+      v-if="sprints.length === 0"
+      class="card sprint-empty-state"
+      style="padding: 48px 24px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;"
+    >
+      <div style="font-size: 42px; line-height: 1;">🏃</div>
+      <div style="max-width: 440px; display: flex; flex-direction: column; gap: 6px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin: 0;">スプリントがまだ作成されていません</h3>
+        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+          スプリント期間（イテレーション）を設定し、バックログからタスクを割り当ててアジャイル開発を始めましょう。
+        </p>
+      </div>
+      <button
+        v-if="canEdit"
+        type="button"
+        class="btn btn-primary"
+        style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;"
+        @click="openCreateModal"
+      >
+        ＋ 最初のスプリントを作成
+      </button>
+    </div>
+
+    <template v-else>
+      <!-- SUBVIEW 1: SPRINT PLANNING AREA -->
     <div v-if="subTab === 'planning'" style="display: flex; flex-direction: column; gap: 16px;">
       <!-- Active Sprint Highlight Banner (if any) -->
       <div
@@ -707,6 +732,7 @@
         </div>
       </template>
     </div>
+    </template>
 
     <!-- Sprint Close Rollover Modal (未完了タスク一括引き継ぎ) -->
     <div

@@ -322,8 +322,28 @@
             </div>
           </div>
 
-          <div v-if="issues.length === 0" class="card" style="text-align: center; padding: 40px;">
-            <p style="font-size: 15px; font-weight: 600;">該当する課題がありません</p>
+          <!-- Kanban Empty State (0 issues) -->
+          <div
+            v-if="issues.length === 0"
+            class="card kanban-empty-state"
+            style="text-align: center; padding: 48px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;"
+          >
+            <div style="font-size: 42px; line-height: 1;">📋</div>
+            <div style="max-width: 440px; display: flex; flex-direction: column; gap: 6px;">
+              <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin: 0;">課題がまだ登録されていません</h3>
+              <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+                課題（Issue）を作成してタスクを整理し、カンバンボードで進捗を可視化しましょう。
+              </p>
+            </div>
+            <button
+              v-if="canEditProjectItems"
+              type="button"
+              class="btn btn-primary"
+              style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;"
+              @click="openNewIssueModal"
+            >
+              ＋ 新規課題を作成
+            </button>
           </div>
 
           <!-- Swimlanes per Issue -->
@@ -504,6 +524,18 @@
                   </div>
                   <div v-if="dragOverCardId === t.id && dragOverPosition === 'after'" class="kanban-drop-indicator"></div>
                 </template>
+
+                <!-- Quick Task Add Button per Cell -->
+                <button
+                  v-if="canEditProjectItems"
+                  type="button"
+                  class="kanban-cell-add-task-btn"
+                  title="このステータスにタスクを追加"
+                  @click.stop="openCreateTaskModal(iss, st.id)"
+                >
+                  <span>＋</span>
+                  <span>タスク追加</span>
+                </button>
               </div>
             </div>
           </div>
@@ -881,7 +913,31 @@
 
     <!-- VIEW 3: SPREADSHEET LIST / TABLE VIEW -->
     <section v-if="activeTab === 'list'">
+      <!-- List Empty State (0 issues) -->
+      <div
+        v-if="issues.length === 0"
+        class="card list-empty-state"
+        style="text-align: center; padding: 48px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;"
+      >
+        <div style="font-size: 42px; line-height: 1;">📋</div>
+        <div style="max-width: 440px; display: flex; flex-direction: column; gap: 6px;">
+          <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin: 0;">課題がまだ登録されていません</h3>
+          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+            課題（Issue）を作成してタスクを整理し、プロジェクトの進捗を管理しましょう。
+          </p>
+        </div>
+        <button
+          v-if="canEditProjectItems"
+          type="button"
+          class="btn btn-primary"
+          style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;"
+          @click="openNewIssueModal"
+        >
+          ＋ 新規課題を作成
+        </button>
+      </div>
       <TaskTableView
+        v-else
         :project-id="projectId"
         :issues="issues"
         :statuses="statuses"
@@ -1462,6 +1518,14 @@
           <div>
             <label class="field-label">タスクタイトル *</label>
             <input v-model="newTaskForm.title" type="text" required style="width: 100%;" />
+          </div>
+          <div>
+            <label class="field-label">ステータス</label>
+            <select v-model="newTaskForm.status_id" style="width: 100%;">
+              <option v-for="st in statuses" :key="st.id" :value="st.id">
+                {{ st.display_order }}. {{ st.name }}
+              </option>
+            </select>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div>
@@ -2184,6 +2248,7 @@ const newTaskParentIssue = ref<Issue | null>(null)
 const newTaskForm = reactive({
   title: '',
   description: '',
+  status_id: '',
   planned_start_date: '',
   planned_end_date: '',
   planned_hours: '' as string | number,
@@ -2854,10 +2919,11 @@ async function submitNewIssue() {
   }
 }
 
-function openNewTaskModal(iss: Issue) {
+function openNewTaskModal(iss: Issue, statusId?: string) {
   newTaskParentIssue.value = iss
   newTaskForm.title = ''
   newTaskForm.description = ''
+  newTaskForm.status_id = statusId || (statuses.value[0]?.id || '')
   newTaskForm.planned_start_date = ''
   newTaskForm.planned_end_date = ''
   newTaskForm.planned_hours = ''
@@ -2866,6 +2932,10 @@ function openNewTaskModal(iss: Issue) {
   newTaskForm.actual_cost = ''
   newTaskForm.progress = 0
   showNewTaskModal.value = true
+}
+
+function openCreateTaskModal(iss: Issue, statusId?: string) {
+  openNewTaskModal(iss, statusId)
 }
 
 async function submitNewTask() {
@@ -2900,6 +2970,7 @@ async function submitNewTask() {
       method: 'POST',
       body: JSON.stringify({
         issue_id: newTaskParentIssue.value.id,
+        status_id: newTaskForm.status_id || undefined,
         title: newTaskForm.title.trim(),
         description: newTaskForm.description,
         planned_start_date: newTaskForm.planned_start_date || null,

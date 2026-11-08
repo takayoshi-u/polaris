@@ -34,6 +34,9 @@
           <span style="font-weight: 700; color: var(--text-main);">
             {{ targetType === 'issue' ? '課題詳細' : 'タスク詳細' }}
           </span>
+          <span v-if="isArchived" class="badge" style="background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-color); font-size: 11px;">
+            📦 アーカイブ済み（読み取り専用）
+          </span>
         </div>
       </div>
 
@@ -1069,7 +1072,7 @@
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span>{{ formatJSTDateTime(c.created_at) }}</span>
                 <button
-                  v-if="(c.author_user_id === currentUser?.id || currentUserRole === 'admin') && editingCommentId !== c.id"
+                  v-if="!isArchived && (c.author_user_id === currentUser?.id || currentUserRole === 'admin') && editingCommentId !== c.id"
                   type="button"
                   class="btn btn-secondary btn-sm"
                   style="padding: 2px 7px; font-size: 11px;"
@@ -1078,7 +1081,7 @@
                   編集
                 </button>
                 <button
-                  v-if="c.author_user_id === currentUser?.id || currentUserRole === 'admin'"
+                  v-if="!isArchived && (c.author_user_id === currentUser?.id || currentUserRole === 'admin')"
                   class="btn btn-danger btn-sm"
                   style="padding: 2px 7px; font-size: 11px;"
                   @click="removeComment(c.id)"
@@ -1287,6 +1290,7 @@ const props = defineProps<{
   sprints?: Sprint[]
   allTasks?: Task[]
   types?: ItemType[]
+  isArchived?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -1302,8 +1306,12 @@ const targetId = computed(() => (props.targetType === 'issue' ? props.issue?.id 
 const targetPathPlural = computed(() => (props.targetType === 'issue' ? 'issues' : 'tasks'))
 const ownerUserId = computed(() => (props.targetType === 'issue' ? props.issue?.owner_user_id || '' : props.task?.owner_user_id || ''))
 
-const canEditAny = computed(() => props.currentUserRole === 'admin' || props.currentUserRole === 'editor')
+const canEditAny = computed(() => {
+  if (props.isArchived) return false
+  return props.currentUserRole === 'admin' || props.currentUserRole === 'editor'
+})
 const canTransferOwner = computed(() => {
+  if (props.isArchived) return false
   return props.currentUserRole === 'admin' || (currentUser.value && currentUser.value.id === ownerUserId.value)
 })
 

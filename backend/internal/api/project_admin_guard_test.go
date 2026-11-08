@@ -205,11 +205,14 @@ func (s *guardMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 		// No groups in this test
 		return &mockRows{cols: []string{"group_id"}, rows: nil}, nil
 
+	case strings.Contains(q, "SELECT is_archived FROM projects"):
+		return &mockRows{cols: []string{"is_archived"}, rows: [][]driver.Value{{false}}}, nil
+
 	case strings.Contains(q, "FROM projects") && strings.Contains(q, "WHERE id = $1"):
 		// GetProject query
 		projID := fmt.Sprintf("%v", args[0])
 		p, exists := st.projects[projID]
-		cols := []string{"id", "name", "description", "hours_per_day", "sprint_duration_days", "default_issue_template_id", "default_task_template_id", "created_by", "created_at", "updated_at"}
+		cols := []string{"id", "name", "description", "hours_per_day", "sprint_duration_days", "default_issue_template_id", "default_task_template_id", "created_by", "is_archived", "archived_at", "archived_by", "created_at", "updated_at"}
 		if !exists {
 			return &mockRows{cols: cols, rows: nil}, nil
 		}
@@ -222,7 +225,7 @@ func (s *guardMockStmt) Query(args []driver.Value) (driver.Rows, error) {
 			sprintDur = 14
 		}
 		values := [][]driver.Value{{
-			p.ID, p.Name, p.Description, p.HoursPerDay, int64(sprintDur), nil, nil, createdByVal, p.CreatedAt, p.UpdatedAt,
+			p.ID, p.Name, p.Description, p.HoursPerDay, int64(sprintDur), nil, nil, createdByVal, false, nil, nil, p.CreatedAt, p.UpdatedAt,
 		}}
 		return &mockRows{cols: cols, rows: values}, nil
 

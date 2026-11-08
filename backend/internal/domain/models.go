@@ -173,6 +173,9 @@ type Project struct {
 	CreatedBy              *string     `json:"created_by"`
 	CurrentUserRole        ProjectRole `json:"current_user_role"`
 	IsMember               bool        `json:"is_member"`
+	IsArchived             bool        `json:"is_archived"`
+	ArchivedAt             *time.Time  `json:"archived_at,omitempty"`
+	ArchivedBy             *string     `json:"archived_by,omitempty"`
 	CreatedAt              time.Time   `json:"created_at"`
 	UpdatedAt              time.Time   `json:"updated_at"`
 }

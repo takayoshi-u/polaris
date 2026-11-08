@@ -34,19 +34,37 @@
         />
       </div>
 
-      <!-- Role Filter Tabs -->
-      <div style="display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 8px; background: var(--bg-main); border: 1px solid var(--border-color);">
-        <button
-          v-for="roleTab in roleTabOptions"
-          :key="roleTab.value"
-          type="button"
-          class="btn btn-sm"
-          :class="selectedRoleFilter === roleTab.value ? 'btn-primary' : 'btn-ghost'"
-          style="padding: 3px 10px; font-size: 12px;"
-          @click="selectedRoleFilter = roleTab.value"
-        >
-          {{ roleTab.label }}
-        </button>
+      <!-- Filter Tabs Container -->
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+        <!-- Status Filter Tabs (Archive state) -->
+        <div style="display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 8px; background: var(--bg-main); border: 1px solid var(--border-color);">
+          <button
+            v-for="statusTab in archiveTabOptions"
+            :key="statusTab.value"
+            type="button"
+            class="btn btn-sm"
+            :class="selectedArchiveFilter === statusTab.value ? 'btn-primary' : 'btn-ghost'"
+            style="padding: 3px 10px; font-size: 12px;"
+            @click="selectedArchiveFilter = statusTab.value"
+          >
+            {{ statusTab.label }}
+          </button>
+        </div>
+
+        <!-- Role Filter Tabs -->
+        <div style="display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 8px; background: var(--bg-main); border: 1px solid var(--border-color);">
+          <button
+            v-for="roleTab in roleTabOptions"
+            :key="roleTab.value"
+            type="button"
+            class="btn btn-sm"
+            :class="selectedRoleFilter === roleTab.value ? 'btn-primary' : 'btn-ghost'"
+            style="padding: 3px 10px; font-size: 12px;"
+            @click="selectedRoleFilter = roleTab.value"
+          >
+            {{ roleTab.label }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -63,12 +81,18 @@
         v-for="p in filteredProjects"
         :key="p.id"
         class="card"
+        :class="{ 'project-card-archived': p.is_archived }"
         style="display: flex; flex-direction: column; justify-content: space-between; gap: 14px;"
       >
         <div>
           <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
             <div>
-              <span style="font-size: 16px; font-weight: 700;">{{ p.name }}</span>
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span style="font-size: 16px; font-weight: 700;">{{ p.name }}</span>
+                <span v-if="p.is_archived" class="badge" style="background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-color); font-size: 11px;">
+                  📦 アーカイブ済み
+                </span>
+              </div>
               <div v-if="projectStatsMap[p.id]?.overdueCount" style="margin-top: 4px;">
                 <span class="badge badge-amber" style="color: var(--danger); border-color: var(--danger); font-size: 11px; font-weight: 700;">
                   ⚠️ 遅延タスク: {{ projectStatsMap[p.id].overdueCount }}件
@@ -101,12 +125,22 @@
           </div>
         </div>
 
-        <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 12px; gap: 8px; flex-wrap: wrap;">
           <div style="display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-secondary);">
             <span>1日基準: <strong>{{ formatHours(p.hours_per_day) }}h</strong></span>
             <span>コスト(予/実): <strong>{{ formatCost(p.total_planned_cost) }} / {{ formatCost(p.total_actual_cost) }}</strong></span>
           </div>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button
+              v-if="canManageProjectArchive(p)"
+              type="button"
+              class="btn btn-secondary btn-sm"
+              style="display: flex; align-items: center; gap: 4px;"
+              @click="openArchiveModal(p, !p.is_archived)"
+            >
+              <span v-if="!p.is_archived">📦 アーカイブ</span>
+              <span v-else>🔄 復元</span>
+            </button>
             <button
               v-if="hasSystemPerm('delete_project')"
               class="btn btn-danger btn-sm"
@@ -198,6 +232,39 @@
         </div>
       </div>
     </div>
+
+    <!-- Archive / Unarchive Confirmation Modal -->
+    <div v-if="archiveModalState.open && archiveModalState.project" class="modal-backdrop" v-backdrop-dismiss="() => archiveModalState.open = false">
+      <div class="modal-panel" style="max-width: 480px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+          <span>{{ archiveModalState.isArchive ? '📦 プロジェクトのアーカイブ' : '🔄 プロジェクトの復元' }}</span>
+        </h3>
+        <div style="font-size: 13px; line-height: 1.6; margin-bottom: 18px; color: var(--text-main);">
+          <p v-if="archiveModalState.isArchive">
+            プロジェクト「<strong>{{ archiveModalState.project.name }}</strong>」をアーカイブしますか？<br />
+            アーカイブすると、内容は<strong>読み取り専用</strong>になり、課題やタスクの追加・編集・削除が行えなくなります。
+          </p>
+          <p v-else>
+            プロジェクト「<strong>{{ archiveModalState.project.name }}</strong>」を復元（アーカイブ解除）しますか？<br />
+            復元すると、通常の課題・タスクの編集や追加が再び可能になります。
+          </p>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn btn-secondary" :disabled="archiveModalState.loading" @click="archiveModalState.open = false">
+            キャンセル
+          </button>
+          <button
+            type="button"
+            :class="archiveModalState.isArchive ? 'btn btn-secondary' : 'btn btn-primary'"
+            style="font-weight: 700;"
+            :disabled="archiveModalState.loading"
+            @click="confirmArchiveOrUnarchive"
+          >
+            {{ archiveModalState.loading ? '⏳ 処理中...' : (archiveModalState.isArchive ? '📦 アーカイブする' : '🔄 復元する') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -207,6 +274,60 @@ import { formatCost, formatHours } from '~/utils/format'
 
 const router = useRouter()
 const { apiFetch, projects, refreshProjects, notifyToast, hasSystemPerm } = useApi()
+
+// Status Filter State (Archive)
+const selectedArchiveFilter = ref<'active' | 'archived' | 'all'>('active')
+const archiveTabOptions = [
+  { label: 'アクティブ', value: 'active' },
+  { label: 'アーカイブ済み', value: 'archived' },
+  { label: 'すべて', value: 'all' }
+]
+
+function canManageProjectArchive(p: Project): boolean {
+  return (p.is_member && p.current_user_role === 'admin') || hasSystemPerm('manage_system') || hasSystemPerm('delete_project')
+}
+
+// Archive / Unarchive Modal
+const archiveModalState = reactive<{
+  open: boolean
+  project: Project | null
+  isArchive: boolean
+  loading: boolean
+}>({
+  open: false,
+  project: null,
+  isArchive: true,
+  loading: false
+})
+
+function openArchiveModal(p: Project, isArchive: boolean) {
+  archiveModalState.open = true
+  archiveModalState.project = p
+  archiveModalState.isArchive = isArchive
+  archiveModalState.loading = false
+}
+
+async function confirmArchiveOrUnarchive() {
+  if (!archiveModalState.project || archiveModalState.loading) return
+  const p = archiveModalState.project
+  archiveModalState.loading = true
+  try {
+    const endpoint = archiveModalState.isArchive ? `/projects/${p.id}/archive` : `/projects/${p.id}/unarchive`
+    await apiFetch(endpoint, { method: 'PUT' })
+    notifyToast(
+      archiveModalState.isArchive
+        ? `プロジェクト「${p.name}」をアーカイブしました`
+        : `プロジェクト「${p.name}」を復元しました`,
+      'success'
+    )
+    archiveModalState.open = false
+    await refreshProjects()
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  } finally {
+    archiveModalState.loading = false
+  }
+}
 
 // P-5 Search & Filter State
 const searchQuery = ref('')
@@ -222,6 +343,10 @@ const roleTabOptions = [
 
 const filteredProjects = computed(() => {
   return projects.value.filter((p) => {
+    // Status filter (Archive)
+    if (selectedArchiveFilter.value === 'active' && p.is_archived) return false
+    if (selectedArchiveFilter.value === 'archived' && !p.is_archived) return false
+
     // Role filter
     if (selectedRoleFilter.value === 'non_member') {
       if (p.is_member) return false

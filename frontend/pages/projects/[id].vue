@@ -10,6 +10,7 @@
       :task="detailModalState.task"
       :parent-issue-title="detailModalState.parentIssueTitle"
       :current-user-role="project?.current_user_role || 'viewer'"
+      :is-archived="project?.is_archived"
       :statuses="statuses"
       :labels="allLabels"
       :custom-fields="customFields"
@@ -25,12 +26,37 @@
 
     <!-- WORKSPACE VIEWS -->
     <template v-else>
+      <!-- Prominent Read-Only Banner for Archived Projects -->
+      <div
+        v-if="project?.is_archived"
+        class="card"
+        style="background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.12);"
+      >
+        <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 13.5px;">
+          <span style="font-size: 18px;">📦</span>
+          <span>このプロジェクトはアーカイブされています。内容は読み取り専用（閲覧のみ）です。</span>
+        </div>
+        <button
+          v-if="canManageProjectArchive"
+          type="button"
+          class="btn btn-sm btn-secondary"
+          style="font-weight: 700; background: #ffffff; border-color: #d97706; color: #92400e; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;"
+          @click="openUnarchiveConfirmModal"
+        >
+          <span>🔄</span>
+          <span>アーカイブ解除</span>
+        </button>
+      </div>
+
       <!-- Top Project Workspace Header (Basic Info & Actions/Settings) -->
       <div class="card" style="padding: 14px 18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <div>
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
               <h1 style="font-size: 17px; font-weight: 700;">{{ project?.name || 'プロジェクト' }}</h1>
+              <span v-if="project?.is_archived" class="badge" style="background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-color); font-size: 11px;">
+                📦 アーカイブ済み
+              </span>
               <span v-if="project" class="badge badge-blue">
                 基準: {{ formatHours(project.hours_per_day) }}h / 日 ・ Role: {{ project.current_user_role.toUpperCase() }}
               </span>
@@ -44,6 +70,14 @@
 
         <!-- Project Actions & Settings Buttons -->
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+          <button
+            v-if="canManageProjectArchive && !project?.is_archived"
+            class="btn btn-secondary btn-sm"
+            title="プロジェクトをアーカイブ（読み取り専用化）"
+            @click="openArchiveConfirmModal"
+          >
+            📦 アーカイブ
+          </button>
           <button class="btn btn-secondary btn-sm" title="タスクデータをCSVでエクスポート" @click="exportProjectCSV">
             📤 CSV エクスポート
           </button>
@@ -1871,6 +1905,39 @@
       @imported="refreshAllWorkspace"
     />
 
+    <!-- Archive / Unarchive Modal in Project Workspace -->
+    <div v-if="showArchiveModal" class="modal-backdrop" v-backdrop-dismiss="() => showArchiveModal = false">
+      <div class="modal-panel" style="max-width: 480px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+          <span>{{ archiveModalMode === 'archive' ? '📦 プロジェクトのアーカイブ確認' : '🔄 アーカイブ解除の確認' }}</span>
+        </h3>
+        <div style="font-size: 13px; line-height: 1.6; margin-bottom: 18px; color: var(--text-main);">
+          <p v-if="archiveModalMode === 'archive'">
+            プロジェクト「<strong>{{ project?.name }}</strong>」をアーカイブしますか？<br />
+            アーカイブすると、内容は<strong>読み取り専用</strong>になり、課題やタスクの追加・編集・削除が行えなくなります。
+          </p>
+          <p v-else>
+            プロジェクト「<strong>{{ project?.name }}</strong>」のアーカイブを解除しますか？<br />
+            アーカイブを解除すると、通常の編集・タスク作成が再び可能になります。
+          </p>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn btn-secondary" :disabled="isArchiveProcessing" @click="showArchiveModal = false">
+            キャンセル
+          </button>
+          <button
+            type="button"
+            :class="archiveModalMode === 'archive' ? 'btn btn-secondary' : 'btn btn-primary'"
+            style="font-weight: 700;"
+            :disabled="isArchiveProcessing"
+            @click="executeArchiveOrUnarchive"
+          >
+            {{ isArchiveProcessing ? '⏳ 処理中...' : (archiveModalMode === 'archive' ? '📦 アーカイブする' : '🔄 アーカイブ解除') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     </template>
   </div>
 </template>
@@ -2109,9 +2176,58 @@ const canManageProjectSettings = computed(() => {
   return project.value?.current_user_role === 'admin' || hasSystemPerm('manage_system')
 })
 
+const canManageProjectArchive = computed(() => {
+  return (
+    project.value?.current_user_role === 'admin' ||
+    hasSystemPerm('manage_system') ||
+    hasSystemPerm('delete_project')
+  )
+})
+
 const canEditProjectItems = computed(() => {
+  if (project.value?.is_archived) return false
   return project.value?.current_user_role === 'admin' || project.value?.current_user_role === 'editor'
 })
+
+// Archive / Unarchive Modal state & actions
+const showArchiveModal = ref(false)
+const archiveModalMode = ref<'archive' | 'unarchive'>('archive')
+const isArchiveProcessing = ref(false)
+
+function openArchiveConfirmModal() {
+  archiveModalMode.value = 'archive'
+  showArchiveModal.value = true
+}
+
+function openUnarchiveConfirmModal() {
+  archiveModalMode.value = 'unarchive'
+  showArchiveModal.value = true
+}
+
+async function executeArchiveOrUnarchive() {
+  if (isArchiveProcessing.value) return
+  isArchiveProcessing.value = true
+  try {
+    const endpoint = archiveModalMode.value === 'archive'
+      ? `/projects/${projectId.value}/archive`
+      : `/projects/${projectId.value}/unarchive`
+    const updated = await apiFetch<Project>(endpoint, { method: 'PUT' })
+    project.value = updated
+    notifyToast(
+      archiveModalMode.value === 'archive'
+        ? 'プロジェクトをアーカイブしました（読み取り専用）'
+        : 'プロジェクトのアーカイブを解除しました',
+      'success'
+    )
+    showArchiveModal.value = false
+    await refreshProjects()
+    await refreshAllWorkspace()
+  } catch (e: any) {
+    notifyToast(e.message, 'error')
+  } finally {
+    isArchiveProcessing.value = false
+  }
+}
 
 watch([activeTab, canManageProjectSettings], ([newTab, canManage]) => {
   if (newTab === 'settings' && !canManage) {
@@ -2350,6 +2466,10 @@ function onProjectGlobalKeydown(e: KeyboardEvent) {
     }
     if (showNewInboundWebhookModal.value) {
       showNewInboundWebhookModal.value = false
+      return
+    }
+    if (showArchiveModal.value) {
+      showArchiveModal.value = false
       return
     }
     if (showCSVImportModal.value) {
@@ -2884,6 +3004,10 @@ async function initActualFromPlanned(task: Task) {
 
 // Create Issue / Task Modals
 function openNewIssueModal() {
+  if (project.value?.is_archived) {
+    notifyToast('アーカイブされたプロジェクトでは新規課題を作成できません', 'warning')
+    return
+  }
   newIssueForm.title = ''
   newIssueForm.description = ''
   newIssueForm.create_initial_task = true
@@ -2892,6 +3016,10 @@ function openNewIssueModal() {
 
 async function submitNewIssue() {
   if (isSubmittingIssue.value) return
+  if (project.value?.is_archived) {
+    notifyToast('アーカイブされたプロジェクトは読み取り専用です', 'warning')
+    return
+  }
   if (!newIssueForm.title.trim()) {
     notifyToast('課題タイトルを入力してください', 'error')
     return
@@ -2920,6 +3048,10 @@ async function submitNewIssue() {
 }
 
 function openNewTaskModal(iss: Issue, statusId?: string) {
+  if (project.value?.is_archived) {
+    notifyToast('アーカイブされたプロジェクトでは新規タスクを作成できません', 'warning')
+    return
+  }
   newTaskParentIssue.value = iss
   newTaskForm.title = ''
   newTaskForm.description = ''
@@ -2962,6 +3094,10 @@ async function submitNewTask() {
   }
   if (aCost !== null && !hasAtMostTwoDecimals(aCost)) {
     notifyToast('実績コストは小数点第2位までで入力してください', 'error')
+    return
+  }
+  if (project.value?.is_archived) {
+    notifyToast('アーカイブされたプロジェクトは読み取り専用です', 'warning')
     return
   }
   isSubmittingTask.value = true

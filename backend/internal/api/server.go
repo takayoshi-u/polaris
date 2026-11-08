@@ -169,6 +169,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/projects", s.requireSystemPerm(domain.PermCreateProject, s.handleCreateProject))
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}", s.requireAuth(s.requireScope("read:projects", s.handleGetProject)))
 	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}", s.requireProjectRole(domain.RoleAdmin, s.requireScope("write:projects", s.handleUpdateProject)))
+	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}/archive", s.requireAuth(s.requireScope("write:projects", s.handleArchiveProject)))
+	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}/unarchive", s.requireAuth(s.requireScope("write:projects", s.handleUnarchiveProject)))
 	s.mux.HandleFunc("DELETE /api/v1/projects/{projectId}", s.requireAuth(s.requireScope("write:projects", s.handleDeleteProject)))
 
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/members", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListProjectMembers)))
@@ -275,8 +277,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/v1/projects/{projectId}/sprints/{sprintId}", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleUpdateSprint)))
 	s.mux.HandleFunc("DELETE /api/v1/projects/{projectId}/sprints/{sprintId}", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleDeleteSprint)))
 	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("read:projects", s.handleGetSprint)))
-	s.mux.HandleFunc("PUT /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("write:projects", s.handleUpdateSprint)))
-	s.mux.HandleFunc("DELETE /api/v1/sprints/{sprintId}", s.requireAuth(s.requireScope("write:projects", s.handleDeleteSprint)))
+	s.mux.HandleFunc("PUT /api/v1/sprints/{sprintId}", s.requireAuth(s.requireSprintWritable(s.requireScope("write:projects", s.handleUpdateSprint))))
+	s.mux.HandleFunc("DELETE /api/v1/sprints/{sprintId}", s.requireAuth(s.requireSprintWritable(s.requireScope("write:projects", s.handleDeleteSprint))))
 	s.mux.HandleFunc("GET /api/v1/sprints/{sprintId}/burndown", s.requireAuth(s.requireScope("read:projects", s.handleGetSprintBurndown)))
 
 	// Activity Logs
@@ -286,8 +288,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/wiki", s.requireProjectRole(domain.RoleViewer, s.requireScope("read:projects", s.handleListWikiPages)))
 	s.mux.HandleFunc("POST /api/v1/projects/{projectId}/wiki", s.requireProjectRole(domain.RoleEditor, s.requireScope("write:projects", s.handleCreateWikiPage)))
 	s.mux.HandleFunc("GET /api/v1/wiki/{wikiId}", s.requireAuth(s.requireScope("read:projects", s.handleGetWikiPage)))
-	s.mux.HandleFunc("PUT /api/v1/wiki/{wikiId}", s.requireAuth(s.requireScope("write:projects", s.handleUpdateWikiPage)))
-	s.mux.HandleFunc("DELETE /api/v1/wiki/{wikiId}", s.requireAuth(s.requireScope("write:projects", s.handleDeleteWikiPage)))
+	s.mux.HandleFunc("PUT /api/v1/wiki/{wikiId}", s.requireAuth(s.requireWikiWritable(s.requireScope("write:projects", s.handleUpdateWikiPage))))
+	s.mux.HandleFunc("DELETE /api/v1/wiki/{wikiId}", s.requireAuth(s.requireWikiWritable(s.requireScope("write:projects", s.handleDeleteWikiPage))))
 
 	// Inbound Webhooks
 	s.mux.HandleFunc("GET /api/v1/projects/{projectId}/inbound-webhooks", s.requireProjectRole(domain.RoleAdmin, s.requireScope("manage:webhooks", s.handleListInboundWebhooks)))
@@ -492,6 +494,19 @@ func (s *Server) requireSystemPerm(perm string, next http.HandlerFunc) http.Hand
 }
 
 func (s *Server) requireProjectRole(minRole domain.ProjectRole, next http.HandlerFunc) http.HandlerFunc {
+	return s.projectRoleGuard(minRole, true, next)
+}
+
+// requireProjectRoleAllowArchived is like requireProjectRole but does not apply the archived read-only block.
+func (s *Server) requireProjectRoleAllowArchived(minRole domain.ProjectRole, next http.HandlerFunc) http.HandlerFunc {
+	return s.projectRoleGuard(minRole, false, next)
+}
+
+func isSafeMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
+}
+
+func (s *Server) projectRoleGuard(minRole domain.ProjectRole, blockWhenArchived bool, next http.HandlerFunc) http.HandlerFunc {
 	return s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		u := currentUser(r)
 		projectID := r.PathValue("projectId")
@@ -507,8 +522,51 @@ func (s *Server) requireProjectRole(minRole domain.ProjectRole, next http.Handle
 				return
 			}
 		}
+		if blockWhenArchived && !isSafeMethod(r.Method) {
+			archived, err := s.store.IsProjectArchived(r.Context(), projectID)
+			// A missing project is left to downstream scope checks/handlers to report.
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				writeError(w, err)
+				return
+			}
+			if archived {
+				writeError(w, store.ErrProjectArchived)
+				return
+			}
+		}
 		next(w, r)
 	})
+}
+
+// requireSprintWritable / requireWikiWritable block mutations on resources whose project is archived.
+func (s *Server) requireSprintWritable(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		archived, err := s.store.IsSprintProjectArchived(r.Context(), r.PathValue("sprintId"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if archived {
+			writeError(w, store.ErrProjectArchived)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) requireWikiWritable(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		archived, err := s.store.IsWikiProjectArchived(r.Context(), r.PathValue("wikiId"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if archived {
+			writeError(w, store.ErrProjectArchived)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -56,6 +56,38 @@ export function createPolarisMcpServer(client?: PolarisClient): McpServer {
     }
   );
 
+  server.tool(
+    'archive_project',
+    'Archive a Polaris project (makes project read-only, hides from default active views)',
+    {
+      projectId: z.string().describe('Project ID (UUID) to archive'),
+    },
+    async ({ projectId }) => {
+      try {
+        const project = await polaris.archiveProject(projectId);
+        return formatSuccess(project);
+      } catch (err) {
+        return formatError('archive_project', err);
+      }
+    }
+  );
+
+  server.tool(
+    'unarchive_project',
+    'Unarchive/restore a Polaris project back to active state',
+    {
+      projectId: z.string().describe('Project ID (UUID) to unarchive'),
+    },
+    async ({ projectId }) => {
+      try {
+        const project = await polaris.unarchiveProject(projectId);
+        return formatSuccess(project);
+      } catch (err) {
+        return formatError('unarchive_project', err);
+      }
+    }
+  );
+
   // ==========================================
   // Issues Tools
   // ==========================================

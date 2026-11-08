@@ -196,11 +196,12 @@ func (s *Store) CreateProject(ctx context.Context, creatorUserID, name, descript
 
 func (s *Store) GetProject(ctx context.Context, projectID, userID string) (*domain.Project, error) {
 	var p domain.Project
-	var issueTpl, taskTpl, createdBy sql.NullString
+	var issueTpl, taskTpl, createdBy, archivedBy sql.NullString
+	var archivedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, hours_per_day, sprint_duration_days, default_issue_template_id, default_task_template_id, created_by, created_at, updated_at
+		SELECT id, name, description, hours_per_day, sprint_duration_days, default_issue_template_id, default_task_template_id, created_by, is_archived, archived_at, archived_by, created_at, updated_at
 		FROM projects WHERE id = $1
-	`, projectID).Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &p.SprintDurationDays, &issueTpl, &taskTpl, &createdBy, &p.CreatedAt, &p.UpdatedAt)
+	`, projectID).Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &p.SprintDurationDays, &issueTpl, &taskTpl, &createdBy, &p.IsArchived, &archivedAt, &archivedBy, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -215,6 +216,12 @@ func (s *Store) GetProject(ctx context.Context, projectID, userID string) (*doma
 	}
 	if createdBy.Valid {
 		p.CreatedBy = &createdBy.String
+	}
+	if archivedAt.Valid {
+		p.ArchivedAt = &archivedAt.Time
+	}
+	if archivedBy.Valid {
+		p.ArchivedBy = &archivedBy.String
 	}
 	_ = s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(planned_cost), 0), COALESCE(SUM(actual_cost), 0)
@@ -248,7 +255,7 @@ func (s *Store) ListProjects(ctx context.Context, userID string, includeNonMembe
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, hours_per_day, sprint_duration_days, default_issue_template_id, default_task_template_id, created_by, created_at, updated_at
+		SELECT id, name, description, hours_per_day, sprint_duration_days, default_issue_template_id, default_task_template_id, created_by, is_archived, archived_at, archived_by, created_at, updated_at
 		FROM projects ORDER BY id ASC
 	`)
 	if err != nil {
@@ -259,8 +266,9 @@ func (s *Store) ListProjects(ctx context.Context, userID string, includeNonMembe
 	var all []domain.Project
 	for rows.Next() {
 		var p domain.Project
-		var issueTpl, taskTpl, createdBy sql.NullString
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &p.SprintDurationDays, &issueTpl, &taskTpl, &createdBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var issueTpl, taskTpl, createdBy, archivedBy sql.NullString
+	var archivedAt sql.NullTime
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.HoursPerDay, &p.SprintDurationDays, &issueTpl, &taskTpl, &createdBy, &p.IsArchived, &archivedAt, &archivedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if issueTpl.Valid {
@@ -271,6 +279,12 @@ func (s *Store) ListProjects(ctx context.Context, userID string, includeNonMembe
 		}
 		if createdBy.Valid {
 			p.CreatedBy = &createdBy.String
+		}
+		if archivedAt.Valid {
+			p.ArchivedAt = &archivedAt.Time
+		}
+		if archivedBy.Valid {
+			p.ArchivedBy = &archivedBy.String
 		}
 		all = append(all, p)
 	}
@@ -1052,3 +1066,95 @@ func saveTemplateRowsTx(ctx context.Context, tx *sql.Tx, templateID string, rows
 	return nil
 }
 
+
+// ErrProjectArchived is returned when a mutating operation targets an archived (read-only) project.
+var ErrProjectArchived = fmt.Errorf("%w: project is archived and read-only", ErrForbidden)
+
+// IsProjectArchived reports whether the project is archived. Unknown projects yield ErrNotFound.
+func (s *Store) IsProjectArchived(ctx context.Context, projectID string) (bool, error) {
+	var archived bool
+	err := s.db.QueryRowContext(ctx, `SELECT is_archived FROM projects WHERE id = $1`, projectID).Scan(&archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return archived, err
+}
+
+// IsSprintProjectArchived reports whether the project owning the sprint is archived.
+func (s *Store) IsSprintProjectArchived(ctx context.Context, sprintID string) (bool, error) {
+	var archived bool
+	err := s.db.QueryRowContext(ctx, `SELECT p.is_archived FROM sprints sp JOIN projects p ON p.id = sp.project_id WHERE sp.id = $1`, sprintID).Scan(&archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return archived, err
+}
+
+// IsWikiProjectArchived reports whether the project owning the wiki page is archived.
+func (s *Store) IsWikiProjectArchived(ctx context.Context, wikiID string) (bool, error) {
+	var archived bool
+	err := s.db.QueryRowContext(ctx, `SELECT p.is_archived FROM wiki_pages w JOIN projects p ON p.id = w.project_id WHERE w.id = $1`, wikiID).Scan(&archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return archived, err
+}
+
+// canManageProjectArchive allows project admins and users holding manage_system / delete_project.
+func (s *Store) canManageProjectArchive(ctx context.Context, projectID, userID string) error {
+	role, err := s.GetEffectiveProjectRole(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if domain.RolePriority(role) >= domain.RolePriority(domain.RoleAdmin) {
+		return nil
+	}
+	for _, perm := range []string{domain.PermManageSystem, domain.PermDeleteProject} {
+		ok, err := s.HasUserSystemPermission(ctx, userID, perm)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: project admin, manage_system or delete_project permission is required", ErrForbidden)
+}
+
+// ArchiveProject marks the project as archived (read-only).
+func (s *Store) ArchiveProject(ctx context.Context, projectID, userID string) (*domain.Project, error) {
+	if err := s.canManageProjectArchive(ctx, projectID, userID); err != nil {
+		return nil, err
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects SET is_archived = TRUE, archived_at = $1, archived_by = $2, updated_at = $1
+		WHERE id = $3 AND is_archived = FALSE
+	`, time.Now().UTC(), userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, fmt.Errorf("%w: project is already archived", ErrConflict)
+	}
+	_ = s.LogActivity(ctx, projectID, "project", projectID, "archived", nil, &userID)
+	return s.GetProject(ctx, projectID, userID)
+}
+
+// UnarchiveProject restores an archived project to read-write.
+func (s *Store) UnarchiveProject(ctx context.Context, projectID, userID string) (*domain.Project, error) {
+	if err := s.canManageProjectArchive(ctx, projectID, userID); err != nil {
+		return nil, err
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects SET is_archived = FALSE, archived_at = NULL, archived_by = NULL, updated_at = $1
+		WHERE id = $2 AND is_archived = TRUE
+	`, time.Now().UTC(), projectID)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, fmt.Errorf("%w: project is not archived", ErrConflict)
+	}
+	_ = s.LogActivity(ctx, projectID, "project", projectID, "unarchived", nil, &userID)
+	return s.GetProject(ctx, projectID, userID)
+}

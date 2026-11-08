@@ -250,6 +250,8 @@ test('MCP Server: registers all expected tools in schema', () => {
     // Projects
     'list_projects',
     'get_project_summary',
+    'archive_project',
+    'unarchive_project',
     // Issues
     'list_issues',
     'get_issue',
@@ -276,7 +278,7 @@ test('MCP Server: registers all expected tools in schema', () => {
       `Expected tool '${toolName}' to be registered on McpServer, but found: ${registeredToolNames.join(', ')}`
     );
   }
-  assert.equal(registeredToolNames.length, 16);
+  assert.equal(registeredToolNames.length, 18);
 });
 
 test('MCP Server: tool handlers invoke client and return formatted responses', async () => {

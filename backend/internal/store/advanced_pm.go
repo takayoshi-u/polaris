@@ -1172,6 +1172,12 @@ func (s *Store) ProcessInboundWebhook(ctx context.Context, token string, bodyByt
 		}
 	}
 
+	if archived, err := s.IsProjectArchived(ctx, wh.ProjectID); err != nil {
+		return nil, err
+	} else if archived {
+		return nil, ErrProjectArchived
+	}
+
 	// Determine parent issue ID
 	targetIssueID := ""
 	if payload.IssueID != nil && *payload.IssueID != "" {

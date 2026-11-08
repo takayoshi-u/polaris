@@ -16,6 +16,9 @@ export interface Project {
   key: string;
   description?: string;
   sprint_duration_days?: number;
+  is_archived?: boolean;
+  archived_at?: string;
+  archived_by?: string;
   created_at?: string;
   updated_at?: string;
   [key: string]: any;
@@ -315,6 +318,18 @@ export class PolarisClient {
 
   public async getProject(projectId: string): Promise<Project> {
     return this.request<Project>(`/projects/${encodeURIComponent(projectId)}`);
+  }
+
+  public async archiveProject(projectId: string): Promise<Project> {
+    return this.request<Project>(`/projects/${encodeURIComponent(projectId)}/archive`, {
+      method: 'PUT',
+    });
+  }
+
+  public async unarchiveProject(projectId: string): Promise<Project> {
+    return this.request<Project>(`/projects/${encodeURIComponent(projectId)}/unarchive`, {
+      method: 'PUT',
+    });
   }
 
   public async getProjectSummary(projectId: string): Promise<ProjectSummary> {

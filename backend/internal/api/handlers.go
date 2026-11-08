@@ -902,6 +902,24 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+func (s *Server) handleArchiveProject(w http.ResponseWriter, r *http.Request) {
+	p, err := s.store.ArchiveProject(r.Context(), r.PathValue("projectId"), currentUser(r).ID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleUnarchiveProject(w http.ResponseWriter, r *http.Request) {
+	p, err := s.store.UnarchiveProject(r.Context(), r.PathValue("projectId"), currentUser(r).ID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	confirmNonMember := r.URL.Query().Get("confirm_non_member") == "true"
 	if err := s.store.DeleteProject(r.Context(), r.PathValue("projectId"), currentUser(r).ID, confirmNonMember); err != nil {

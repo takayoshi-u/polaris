@@ -106,6 +106,9 @@ export interface Project {
   total_planned_cost: number
   total_actual_cost: number
   created_by?: string | null
+  is_archived?: boolean
+  archived_at?: string
+  archived_by?: string
   current_user_role: ProjectRole
   is_member: boolean
   created_at: string

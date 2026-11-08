@@ -424,3 +424,48 @@ test('ItemDetailModal organizes long sections into clean sub-tabs under details'
   assert.ok(modalSrc.includes("modalTab === 'history'"), 'History activity tab must remain accessible')
   assert.ok(modalSrc.includes('isDirty && canEditAny'), 'Sticky floating dirty bar must remain available for instant saves')
 })
+
+test('Project Archive: types, list filtering, badges, card actions, and detail read-only banner', () => {
+  const typesSrc = fs.readFileSync(path.join(__dirname, '../types/polaris.ts'), 'utf8')
+  const indexPageSrc = fs.readFileSync(path.join(__dirname, '../pages/index.vue'), 'utf8')
+  const projectPageSrc = fs.readFileSync(path.join(__dirname, '../pages/projects/[id].vue'), 'utf8')
+  const cssSrc = fs.readFileSync(path.join(__dirname, '../assets/css/main.css'), 'utf8')
+  const modalSrc = fs.readFileSync(path.join(__dirname, '../components/ItemDetailModal.vue'), 'utf8')
+
+  // 1. TypeScript types
+  assert.ok(typesSrc.includes('is_archived?: boolean'), 'Project interface must include is_archived property')
+  assert.ok(typesSrc.includes('archived_at?: string'), 'Project interface must include archived_at property')
+  assert.ok(typesSrc.includes('archived_by?: string'), 'Project interface must include archived_by property')
+
+  // 2. Project List (index.vue) Status Filter Tab
+  assert.ok(indexPageSrc.includes('archiveTabOptions'), 'index.vue must define archiveTabOptions')
+  assert.ok(indexPageSrc.includes("'アクティブ'"), 'archive filter must include アクティブ option')
+  assert.ok(indexPageSrc.includes("'アーカイブ済み'"), 'archive filter must include アーカイブ済み option')
+  assert.ok(indexPageSrc.includes("selectedArchiveFilter.value === 'active' && p.is_archived"), 'filteredProjects must filter out archived projects by default')
+
+  // 3. Project card archive styling & badges
+  assert.ok(indexPageSrc.includes('project-card-archived'), 'Archived projects must receive project-card-archived CSS class')
+  assert.ok(cssSrc.includes('.project-card-archived'), 'main.css must define .project-card-archived style')
+  assert.ok(indexPageSrc.includes('📦 アーカイブ済み'), 'Archived card must render 📦 アーカイブ済み badge')
+
+  // 4. Archive & Unarchive action buttons and API calls
+  assert.ok(indexPageSrc.includes('/archive'), 'index.vue must support calling archive API endpoint')
+  assert.ok(indexPageSrc.includes('/unarchive'), 'index.vue must support calling unarchive API endpoint')
+  assert.ok(indexPageSrc.includes('canManageProjectArchive'), 'index.vue must evaluate canManageProjectArchive permission')
+  assert.ok(indexPageSrc.includes('📦 プロジェクトのアーカイブ'), 'index.vue must render archive confirmation modal')
+  assert.ok(indexPageSrc.includes('🔄 プロジェクトの復元'), 'index.vue must render unarchive confirmation modal')
+
+  // 5. Project Detail View (projects/[id].vue) prominent read-only banner
+  assert.ok(projectPageSrc.includes('このプロジェクトはアーカイブされています。内容は読み取り専用（閲覧のみ）です。'), 'projects/[id].vue must render prominent read-only banner')
+  assert.ok(projectPageSrc.includes('📦'), 'Banner must feature archive emoji')
+  assert.ok(projectPageSrc.includes('🔄'), 'Banner must feature unarchive icon')
+  assert.ok(projectPageSrc.includes('アーカイブ解除'), 'Banner must feature アーカイブ解除 button for admins')
+  assert.ok(projectPageSrc.includes('/projects/${projectId.value}/archive'), 'projects/[id].vue must call archive endpoint with projectId.value')
+  assert.ok(projectPageSrc.includes('/projects/${projectId.value}/unarchive'), 'projects/[id].vue must call unarchive endpoint with projectId.value')
+
+  // 6. Mutating actions disabled when archived
+  assert.ok(projectPageSrc.includes('if (project.value?.is_archived) return false'), 'canEditProjectItems must return false when project is archived')
+  assert.ok(projectPageSrc.includes(':is-archived="project?.is_archived"'), 'ItemDetailModal must receive is-archived prop')
+  assert.ok(modalSrc.includes('isArchived?: boolean'), 'ItemDetailModal must define isArchived prop')
+  assert.ok(modalSrc.includes('if (props.isArchived) return false'), 'ItemDetailModal canEditAny must return false when isArchived is true')
+})

@@ -225,6 +225,16 @@ input[type="range"]:disabled::-moz-range-thumb {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
+.project-card-archived {
+  background-color: var(--bg-main) !important;
+  border-style: dashed !important;
+  opacity: 0.88;
+}
+
+.project-card-archived:hover {
+  opacity: 1;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
